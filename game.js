@@ -1,16 +1,17 @@
-/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS - FIXED HITBOXES + ENEMIES MOVE)
+/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS - FIXED Q-BLOCK HITBOXES + ENEMY PATROL)
    Works on GitHub Pages.
 
    Visual upgrades:
-   - Procedurally generated textures (no external assets)
-   - Player looks like a cell (membrane + nucleus)
-   - Platforms are rounded tiles (less blocky)
-   - Coins and Q-blocks use textures
+   - Procedural textures (no external assets)
+   - Player looks like a cell
+   - Rounded platform tiles
+   - Coins + Q-blocks textured
 
    Gameplay fixes:
-   - Enemies reliably move/patrol (created via physics group create)
-   - Q-blocks are SOLID (stand on them / collide sides)
-   - Questions trigger ONLY when hit from below (Mario-style)
+   - Q-blocks are SOLID (stand on / collide sides); questions trigger only on bottom-hit
+   - Enemies spawn slightly lower (so they settle onto ground quickly)
+   - Enemies cannot "leave the game": they patrol within a bounded range and reverse direction
+     (also reverse on walls and world bounds)
 
    Files expected:
    - /shared/storage.js  (provides window.BQ)
@@ -133,6 +134,10 @@
         this.attempt = 1;
         this.levelStartMs = 0;
         this.qIndex = 0;
+
+        // Enemy tuning
+        this.enemySpeed = 80;
+        this.enemyPatrolRange = 260; // pixels left/right from spawn
       }
 
       // ----- Texture generation (no external assets) -----
@@ -264,21 +269,22 @@
         this.qblocks = this.physics.add.staticGroup();
         this.flag = this.physics.add.staticGroup();
 
-        // Enemies: configure as Arcade Sprites and create through group.create()
+        // Enemies: create via group.create so Arcade movement is reliable
         this.enemies = this.physics.add.group({
           classType: Phaser.Physics.Arcade.Sprite,
           allowGravity: true,
           immovable: false
         });
 
-        // Ground tiles
+        // Ground tiles (static bodies)
+        // Place so the TOP of the tile is around y ~ 510, leaving ~30px margin at bottom.
         for (let x = 0; x < levelWidth; x += 64) {
           const ground = this.add.image(x + 32, H - 18, "platform64");
           this.physics.add.existing(ground, true);
           this.platforms.add(ground);
         }
 
-        // Floating platforms
+        // Floating platforms (tile-built)
         this.addPlatform(380, 380, 180);
         this.addPlatform(780, 320, 220);
         this.addPlatform(1260, 360, 220);
@@ -297,10 +303,11 @@
         this.spawnCoin(820, 280);
         this.spawnCoin(1760, 280);
 
-        // Enemies
-        this.spawnEnemy(520, H - 80);
-        this.spawnEnemy(980, H - 80);
-        this.spawnEnemy(1500, H - 80);
+        // Enemies (spawn a little LOWER so they “sit” on the ground faster)
+        // Ground top is ~ (H - 18) - 12 = H - 30. Enemy half-height ~ 15 => center ~ H - 45.
+        this.spawnEnemy(520, H - 45);
+        this.spawnEnemy(980, H - 45);
+        this.spawnEnemy(1500, H - 45);
 
         // Q-blocks
         this.spawnQBlock(320, 300, "qb1");
@@ -316,7 +323,7 @@
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.enemies, this.platforms);
 
-        // Q-blocks solid + trigger on bottom-hit
+        // Q-blocks: SOLID + trigger question on bottom-hit
         this.physics.add.collider(this.player, this.qblocks, this.onQBlockCollide, null, this);
         this.physics.add.collider(this.enemies, this.qblocks);
 
@@ -325,7 +332,7 @@
         this.physics.add.overlap(this.player, this.enemies, this.onEnemy, null, this);
         this.physics.add.overlap(this.player, this.flag, this.onWin, null, this);
 
-        // Camera
+        // Camera follow
         this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
         this.cameras.main.setBounds(0, 0, levelWidth, H);
 
@@ -355,7 +362,7 @@
         this.coins.add(coin);
       }
 
-      // IMPORTANT: create enemy THROUGH the physics group so Arcade movement works reliably
+      // Enemy: bounded patrol so it cannot wander/fall off camera forever.
       spawnEnemy(x, y) {
         const enemy = this.enemies.create(x, y, "enemy30");
 
@@ -364,17 +371,26 @@
         enemy.body.setImmovable(false);
         enemy.body.setGravityY(900);
         enemy.body.setDrag(0, 0);
-
-        enemy.body.setVelocityX(-80);
-        enemy.body.setMaxVelocity(200, 1000);
         enemy.body.setSize(26, 26, true);
+
+        // Patrol bounds (clip within world)
+        const w = this.physics.world.bounds.width;
+        enemy.patrolMinX = Math.max(20, x - this.enemyPatrolRange);
+        enemy.patrolMaxX = Math.min(w - 20, x + this.enemyPatrolRange);
+
+        // Start moving left
+        enemy.body.setVelocityX(-this.enemySpeed);
+        enemy.body.setMaxVelocity(240, 1200);
+
+        // Ensure it can't “bounce out” weirdly
+        enemy.body.setBounce(0, 0);
 
         return enemy;
       }
 
       spawnQBlock(x, y, id) {
         const qb = this.add.image(x, y, "qblock28");
-        this.physics.add.existing(qb, true);
+        this.physics.add.existing(qb, true); // static solid
         qb.qbId = id;
         qb.used = false;
         this.qblocks.add(qb);
@@ -391,15 +407,30 @@
         const onGround = this.player.body.blocked.down;
         if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
 
-        // Enemy patrol + anti-stall
+        // Enemy patrol: reverse at patrol bounds, world-bounds, or walls.
         this.enemies.children.iterate(e => {
           if (!e?.body) return;
 
+          // Anti-stall: if speed drops to ~0, restart in a direction
           if (Math.abs(e.body.velocity.x) < 5) {
-            e.body.setVelocityX(-80);
+            const dir = (e.x <= (e.patrolMinX + 5)) ? 1 : -1;
+            e.body.setVelocityX(dir * this.enemySpeed);
           }
-          if (e.body.blocked.left || e.body.touching.left) e.body.setVelocityX(80);
-          if (e.body.blocked.right || e.body.touching.right) e.body.setVelocityX(-80);
+
+          // Reverse at patrol edges
+          if (e.x <= e.patrolMinX) e.body.setVelocityX(this.enemySpeed);
+          if (e.x >= e.patrolMaxX) e.body.setVelocityX(-this.enemySpeed);
+
+          // Reverse on wall hits
+          if (e.body.blocked.left || e.body.touching.left) e.body.setVelocityX(this.enemySpeed);
+          if (e.body.blocked.right || e.body.touching.right) e.body.setVelocityX(-this.enemySpeed);
+
+          // Safety: if something goes wrong and it falls far below, warp back inside patrol
+          if (e.y > this.physics.world.bounds.height + 100) {
+            e.y = 200;
+            e.x = (e.patrolMinX + e.patrolMaxX) / 2;
+            e.body.setVelocityX(-this.enemySpeed);
+          }
         });
 
         this.updateHUD();
@@ -431,7 +462,7 @@
         }
       }
 
-      // Collider callback: Q-blocks are solid; question triggers only on bottom-hit.
+      // Q-blocks are solid; question triggers only when hit from below.
       onQBlockCollide(player, qb) {
         if (qb.used) return;
 
@@ -455,7 +486,10 @@
           this.score += 50;
           this.spawnCoin(qb.x, qb.y - 30);
         } else {
-          this.spawnEnemy(qb.x + 40, qb.y - 20);
+          // Spawn the new enemy inside a small patrol window around the block
+          const e = this.spawnEnemy(qb.x + 40, qb.y - 10);
+          e.patrolMinX = Math.max(e.patrolMinX, qb.x - 140);
+          e.patrolMaxX = Math.min(e.patrolMaxX, qb.x + 140);
         }
       }
 
@@ -514,7 +548,11 @@
 
   function escapeHtml(s) {
     return String(s ?? "").replace(/[&<>"']/g, c => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;"
     }[c]));
   }
 })();
