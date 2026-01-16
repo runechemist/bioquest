@@ -268,12 +268,12 @@
         const left = this.cursors.left.isDown || this.keyA.isDown;
         const right = this.cursors.right.isDown || this.keyD.isDown;
 
-        if (left) this.player.body.setVelocityX(-180);
-        else if (right) this.player.body.setVelocityX(180);
+        if (left) this.player.body.setVelocityX(-220);
+        else if (right) this.player.body.setVelocityX(220);
         else this.player.body.setVelocityX(0);
 
         const onGround = this.player.body.blocked.down;
-        if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-420);
+        if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
 
         // Enemy patrol reverse on walls
         this.enemies.children.iterate(e => {
@@ -400,3 +400,4 @@
     }[c]));
   }
 })();
+
