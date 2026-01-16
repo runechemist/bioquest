@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>BioQuest Teacher Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="../shared/styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div><strong>BioQuest Teacher Dashboard</strong></div>
+    <div class="topbar-right">
+      <a href="../">Back to Game</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="panel">
+      <div class="row">
+        <div>
+          <label>Class Code</label>
+          <input id="classCode" placeholder="Create or enter code" maxlength="12" />
+          <div class="small">Codes are just labels for grouping results.</div>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="newCodeBtn">Generate New Code</button>
+          <div class="small">Share this code with students.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <div>
+          <label>Mastery Accuracy (%)</label>
+          <input id="mastery" type="number" min="0" max="100" value="70" />
+        </div>
+        <div>
+          <label>Attempts Allowed (Assessment)</label>
+          <input id="attempts" type="number" min="1" max="10" value="3" />
+        </div>
+        <div>
+          <label>Infinite Lives (Practice)</label>
+          <select id="infiniteLives">
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <button id="saveBtn">Save Settings</button>
+      </div>
+      <div class="small">Settings are stored in this browser. If you open on another computer, you’ll need to re-enter settings.</div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <button id="refreshBtn">Refresh Results</button>
+        <button id="exportBtn">Export CSV</button>
+        <button id="clearBtn">Clear Results (This Class Code)</button>
+      </div>
+      <div id="results"></div>
+    </div>
+  </div>
+
+  <script src="../shared/storage.js"></script>
+  <script src="./teacher.js"></script>
+</body>
+</html>

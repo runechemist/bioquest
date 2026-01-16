@@ -1,0 +1,44 @@
+{
+  "levelId": "world1-1",
+  "questions": [
+    {
+      "id": "ct1",
+      "prompt": "Which statement is part of cell theory?",
+      "choices": [
+        "All cells have chloroplasts",
+        "All living things are made of cells",
+        "Cells are only in animals",
+        "Cells are visible without tools"
+      ],
+      "answerIndex": 1
+    },
+    {
+      "id": "ct2",
+      "prompt": "“Cells come from pre-existing cells” means…",
+      "choices": [
+        "Cells appear spontaneously",
+        "New cells form by division of existing cells",
+        "Cells form from nonliving matter",
+        "Only plants make new cells"
+      ],
+      "answerIndex": 1
+    },
+    {
+      "id": "pk1",
+      "prompt": "Which feature most strongly indicates a eukaryotic cell?",
+      "choices": ["Cell membrane", "Ribosomes", "Nucleus", "DNA"],
+      "answerIndex": 2
+    },
+    {
+      "id": "pk2",
+      "prompt": "Prokaryotic cells generally…",
+      "choices": [
+        "Have a nucleus",
+        "Lack membrane-bound organelles",
+        "Are always larger than eukaryotic cells",
+        "Cannot reproduce"
+      ],
+      "answerIndex": 1
+    }
+  ]
+}
