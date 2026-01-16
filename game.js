@@ -1,4 +1,4 @@
-/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS)
+/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS - FIXED HITBOXES + ENEMIES)
    Works on GitHub Pages.
 
    Visual upgrades:
@@ -6,6 +6,11 @@
    - Player looks like a cell (membrane + nucleus)
    - Platforms are rounded tiles (less blocky)
    - Coins and Q-blocks use textures
+
+   Gameplay fixes:
+   - Enemies reliably move/patrol and recover if they stall
+   - Q-blocks have solid collision on top/sides (stand on them)
+   - Questions trigger ONLY when hit from below (Mario-style)
 
    Files expected:
    - /shared/storage.js  (provides window.BQ)
@@ -141,23 +146,18 @@
           const cx = size / 2;
           const cy = size / 2;
 
-          // membrane
           g.fillStyle(0x5fd3ff, 1);
           g.fillCircle(cx, cy, 20);
 
-          // membrane highlight
           g.fillStyle(0xb8f0ff, 0.45);
           g.fillCircle(cx - 6, cy - 8, 10);
 
-          // nucleus
           g.fillStyle(0x3a4cff, 0.9);
           g.fillCircle(cx + 6, cy + 6, 8);
 
-          // nucleus shine
           g.fillStyle(0xffffff, 0.5);
           g.fillCircle(cx + 3, cy + 3, 3);
 
-          // outline
           g.lineStyle(3, 0x0b2a33, 0.9);
           g.strokeCircle(cx, cy, 20);
 
@@ -187,7 +187,7 @@
           c.destroy();
         }
 
-        // Q-block (28x28)
+        // Q-block (28x28) - line-based "?" for compatibility
         {
           const q = this.make.graphics({ x: 0, y: 0, add: false });
           q.fillStyle(0xdedcff, 1);
@@ -195,23 +195,18 @@
           q.lineStyle(2, 0xffffff, 1);
           q.strokeRoundedRect(0, 0, 28, 28, 6);
 
-          // "?" mark (line-based; compatible with Phaser Graphics)
-            q.lineStyle(3, 0x333366, 1);
+          q.lineStyle(3, 0x333366, 1);
+          q.beginPath();
+          q.moveTo(10, 9);
+          q.lineTo(14, 7);
+          q.lineTo(18, 9);
+          q.lineTo(18, 12);
+          q.lineTo(14, 14);
+          q.lineTo(14, 18);
+          q.strokePath();
 
-            // top curve-ish shape made from segments
-            q.beginPath();
-            q.moveTo(10, 9);
-            q.lineTo(14, 7);
-            q.lineTo(18, 9);
-            q.lineTo(18, 12);
-            q.lineTo(14, 14);
-            q.lineTo(14, 18);
-            q.strokePath();
-
-            // dot
-            q.fillStyle(0x333366, 1);
-            q.fillCircle(14, 22, 2);
-
+          q.fillStyle(0x333366, 1);
+          q.fillCircle(14, 22, 2);
 
           q.generateTexture("qblock28", 28, 28);
           q.destroy();
@@ -246,7 +241,6 @@
         const H = 540;
         const levelWidth = 3000;
 
-        // Settings
         const s = session.settings || {};
         this.infiniteLives = (session.mode === "practice") ? true : !!s.infiniteLives;
         this.masteryAccuracy = Number(s.masteryAccuracy ?? 70);
@@ -269,9 +263,11 @@
         this.coins = this.physics.add.staticGroup();
         this.qblocks = this.physics.add.staticGroup();
         this.flag = this.physics.add.staticGroup();
-        this.enemies = this.physics.add.group(); // dynamic
 
-        // Ground (platform tiles)
+        // IMPORTANT: enemies as physics group for reliable movement/collisions
+        this.enemies = this.physics.add.group({ allowGravity: true, immovable: false });
+
+        // Ground tiles
         for (let x = 0; x < levelWidth; x += 64) {
           const ground = this.add.image(x + 32, H - 18, "platform64");
           this.physics.add.existing(ground, true);
@@ -285,11 +281,10 @@
         this.addPlatform(1700, 320, 260);
         this.addPlatform(2200, 360, 220);
 
-        // Player (cell sprite)
+        // Player
         this.player = this.physics.add.image(80, H - 90, "cellPlayer");
         this.player.setCollideWorldBounds(true);
         this.player.body.setGravityY(800);
-        // Make collisions feel like Mario (smaller than the sprite)
         this.player.body.setSize(28, 34, true);
 
         // Coins
@@ -303,12 +298,12 @@
         this.spawnEnemy(980, H - 80);
         this.spawnEnemy(1500, H - 80);
 
-        // Question blocks
+        // Q-blocks
         this.spawnQBlock(320, 300, "qb1");
         this.spawnQBlock(1100, 300, "qb2");
         this.spawnQBlock(2050, 300, "qb3");
 
-        // Flagpole
+        // Flag
         const flagImg = this.add.image(levelWidth - 150, H - 120, "flag18x200");
         this.physics.add.existing(flagImg, true);
         this.flag.add(flagImg);
@@ -317,13 +312,19 @@
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.enemies, this.platforms);
 
+        // Q-blocks should be SOLID (stand on them, hit sides)
+        // Trigger questions only when hit from below
+        this.physics.add.collider(this.player, this.qblocks, this.onQBlockCollide, null, this);
+
+        // Optional: enemies also collide with Q-blocks
+        this.physics.add.collider(this.enemies, this.qblocks);
+
         // Overlaps
         this.physics.add.overlap(this.player, this.coins, this.onCoin, null, this);
         this.physics.add.overlap(this.player, this.enemies, this.onEnemy, null, this);
-        this.physics.add.overlap(this.player, this.qblocks, this.onQBlock, null, this);
         this.physics.add.overlap(this.player, this.flag, this.onWin, null, this);
 
-        // Camera follow
+        // Camera
         this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
         this.cameras.main.setBounds(0, 0, levelWidth, H);
 
@@ -336,7 +337,6 @@
         this.updateHUD();
       }
 
-      // Platforms made from repeated 64px tiles
       addPlatform(x, y, widthPx) {
         const segments = Math.max(1, Math.round(widthPx / 64));
         const totalW = segments * 64;
@@ -359,13 +359,18 @@
         enemy.body.setSize(26, 26, true);
         enemy.body.setGravityY(900);
         enemy.body.setCollideWorldBounds(true);
+
+        // Force initial motion
         enemy.body.setVelocityX(-80);
+        enemy.body.setMaxVelocity(200, 1000);
+
         this.enemies.add(enemy);
+        return enemy;
       }
 
       spawnQBlock(x, y, id) {
         const qb = this.add.image(x, y, "qblock28");
-        this.physics.add.existing(qb, true);
+        this.physics.add.existing(qb, true); // static solid body
         qb.qbId = id;
         qb.used = false;
         this.qblocks.add(qb);
@@ -382,11 +387,15 @@
         const onGround = this.player.body.blocked.down;
         if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
 
-        // Enemy patrol reverse on walls
+        // Enemy patrol and anti-stall
         this.enemies.children.iterate(e => {
           if (!e?.body) return;
-          if (e.body.blocked.left) e.body.setVelocityX(80);
-          if (e.body.blocked.right) e.body.setVelocityX(-80);
+
+          if (Math.abs(e.body.velocity.x) < 5) {
+            e.body.setVelocityX(-80);
+          }
+          if (e.body.blocked.left || e.body.touching.left) e.body.setVelocityX(80);
+          if (e.body.blocked.right || e.body.touching.right) e.body.setVelocityX(-80);
         });
 
         this.updateHUD();
@@ -418,10 +427,12 @@
         }
       }
 
-      onQBlock(player, qb) {
+      // Collider callback so Q-blocks are SOLID.
+      // Trigger questions only when player hits the block from below.
+      onQBlockCollide(player, qb) {
         if (qb.used) return;
 
-        const hitFromBelow = player.body.velocity.y < -50 && player.y > qb.y;
+        const hitFromBelow = player.body.touching.up && qb.body.touching.down;
         if (!hitFromBelow) return;
 
         qb.used = true;
@@ -504,4 +515,3 @@
     }[c]));
   }
 })();
-
