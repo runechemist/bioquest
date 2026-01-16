@@ -195,17 +195,23 @@
           q.lineStyle(2, 0xffffff, 1);
           q.strokeRoundedRect(0, 0, 28, 28, 6);
 
-          // "?" mark
-          q.lineStyle(3, 0x333366, 1);
-          q.beginPath();
-          q.moveTo(14, 7);
-          q.quadraticCurveTo(20, 7, 20, 12);
-          q.quadraticCurveTo(20, 16, 14, 16);
-          q.lineTo(14, 19);
-          q.strokePath();
+          // "?" mark (line-based; compatible with Phaser Graphics)
+            q.lineStyle(3, 0x333366, 1);
 
-          q.fillStyle(0x333366, 1);
-          q.fillCircle(14, 23, 2);
+            // top curve-ish shape made from segments
+            q.beginPath();
+            q.moveTo(10, 9);
+            q.lineTo(14, 7);
+            q.lineTo(18, 9);
+            q.lineTo(18, 12);
+            q.lineTo(14, 14);
+            q.lineTo(14, 18);
+            q.strokePath();
+
+            // dot
+            q.fillStyle(0x333366, 1);
+            q.fillCircle(14, 22, 2);
+
 
           q.generateTexture("qblock28", 28, 28);
           q.destroy();
@@ -498,3 +504,4 @@
     }[c]));
   }
 })();
+
