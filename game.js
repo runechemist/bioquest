@@ -193,7 +193,7 @@
         // Player
         this.player = this.makeDynamicRect(80, H - 80, 26, 34, 0x66ccff);
         this.player.body.setCollideWorldBounds(true);
-        this.player.body.setGravityY(900);
+        this.player.body.setGravityY(800);
 
         // Coins
         this.spawnCoin(220, H - 90);
@@ -400,4 +400,5 @@
     }[c]));
   }
 })();
+
 
