@@ -1,19 +1,15 @@
-/* BioQuest MVP - game.js (FULL FILE)
+/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS)
    Works on GitHub Pages.
-   Fixes Phaser error: uses this.add.rectangle + this.physics.add.existing() (no this.physics.add.rectangle)
+
+   Visual upgrades:
+   - Procedurally generated textures (no external assets)
+   - Player looks like a cell (membrane + nucleus)
+   - Platforms are rounded tiles (less blocky)
+   - Coins and Q-blocks use textures
 
    Files expected:
    - /shared/storage.js  (provides window.BQ)
    - /data/questions_world1-1.json
-
-   Student flow:
-   - Enter Class Code + Student ID + Mode
-   - Start World 1-1
-   - Gameplay: A/D or Arrows to move, Up to jump
-   - Hit ? blocks from below to answer questions
-   - Stomp enemies to defeat
-   - Touch flag to end
-   - Writes results to localStorage (via BQ.writeResult)
 */
 
 (() => {
@@ -71,10 +67,8 @@
       return;
     }
 
-    // Load class settings (local-first)
     const settings = BQ.getClassSettings(classCode);
 
-    // Load question bank with clear error reporting
     let questionBank;
     try {
       const res = await fetch("./data/questions_world1-1.json", { cache: "no-store" });
@@ -95,7 +89,6 @@
       startedAtISO: new Date().toISOString()
     };
 
-    // Hide UI panel and show badges
     UI.innerHTML = `
       <div class="panel">
         <span class="badge">Class ${escapeHtml(classCode)}</span>
@@ -137,17 +130,110 @@
         this.qIndex = 0;
       }
 
-      // ----- Helpers: rectangles + Arcade Physics bodies -----
-      makeStaticRect(x, y, w, h, color) {
-        const r = this.add.rectangle(x, y, w, h, color);
-        this.physics.add.existing(r, true); // static body
-        return r;
-      }
+      // ----- Texture generation (no external assets) -----
+      createProceduralTextures() {
+        if (this.textures.exists("cellPlayer")) return;
 
-      makeDynamicRect(x, y, w, h, color) {
-        const r = this.add.rectangle(x, y, w, h, color);
-        this.physics.add.existing(r, false); // dynamic body
-        return r;
+        // Player cell texture (48x48)
+        {
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          const size = 48;
+          const cx = size / 2;
+          const cy = size / 2;
+
+          // membrane
+          g.fillStyle(0x5fd3ff, 1);
+          g.fillCircle(cx, cy, 20);
+
+          // membrane highlight
+          g.fillStyle(0xb8f0ff, 0.45);
+          g.fillCircle(cx - 6, cy - 8, 10);
+
+          // nucleus
+          g.fillStyle(0x3a4cff, 0.9);
+          g.fillCircle(cx + 6, cy + 6, 8);
+
+          // nucleus shine
+          g.fillStyle(0xffffff, 0.5);
+          g.fillCircle(cx + 3, cy + 3, 3);
+
+          // outline
+          g.lineStyle(3, 0x0b2a33, 0.9);
+          g.strokeCircle(cx, cy, 20);
+
+          g.generateTexture("cellPlayer", size, size);
+          g.destroy();
+        }
+
+        // Platform tile (64x24)
+        {
+          const p = this.make.graphics({ x: 0, y: 0, add: false });
+          p.fillStyle(0x2f2f2f, 1);
+          p.fillRoundedRect(0, 0, 64, 24, 10);
+          p.lineStyle(2, 0x4a4a4a, 1);
+          p.strokeRoundedRect(0, 0, 64, 24, 10);
+          p.generateTexture("platform64", 64, 24);
+          p.destroy();
+        }
+
+        // Coin (20x20)
+        {
+          const c = this.make.graphics({ x: 0, y: 0, add: false });
+          c.fillStyle(0xffd34d, 1);
+          c.fillCircle(10, 10, 9);
+          c.fillStyle(0xffffff, 0.45);
+          c.fillCircle(7, 7, 4);
+          c.generateTexture("coin20", 20, 20);
+          c.destroy();
+        }
+
+        // Q-block (28x28)
+        {
+          const q = this.make.graphics({ x: 0, y: 0, add: false });
+          q.fillStyle(0xdedcff, 1);
+          q.fillRoundedRect(0, 0, 28, 28, 6);
+          q.lineStyle(2, 0xffffff, 1);
+          q.strokeRoundedRect(0, 0, 28, 28, 6);
+
+          // "?" mark
+          q.lineStyle(3, 0x333366, 1);
+          q.beginPath();
+          q.moveTo(14, 7);
+          q.quadraticCurveTo(20, 7, 20, 12);
+          q.quadraticCurveTo(20, 16, 14, 16);
+          q.lineTo(14, 19);
+          q.strokePath();
+
+          q.fillStyle(0x333366, 1);
+          q.fillCircle(14, 23, 2);
+
+          q.generateTexture("qblock28", 28, 28);
+          q.destroy();
+        }
+
+        // Enemy (30x30)
+        {
+          const e = this.make.graphics({ x: 0, y: 0, add: false });
+          e.fillStyle(0xff6666, 1);
+          e.fillRoundedRect(0, 0, 30, 30, 10);
+          e.fillStyle(0xffffff, 0.35);
+          e.fillRoundedRect(6, 6, 10, 10, 6);
+          e.lineStyle(2, 0x5a1f1f, 0.8);
+          e.strokeRoundedRect(0, 0, 30, 30, 10);
+          e.generateTexture("enemy30", 30, 30);
+          e.destroy();
+        }
+
+        // Flag (18x200)
+        {
+          const f = this.make.graphics({ x: 0, y: 0, add: false });
+          f.fillStyle(0x00ff66, 1);
+          f.fillRoundedRect(0, 0, 18, 200, 8);
+          f.lineStyle(2, 0x0a5a2a, 0.8);
+          f.strokeRoundedRect(0, 0, 18, 200, 8);
+          f.generateTexture("flag18x200", 18, 200);
+          f.destroy();
+        }
       }
 
       create() {
@@ -160,7 +246,9 @@
         this.masteryAccuracy = Number(s.masteryAccuracy ?? 70);
         this.attemptsAllowed = Number(s.attemptsAllowed ?? 3);
 
-        this.cameras.main.setBackgroundColor("#111");
+        this.createProceduralTextures();
+
+        this.cameras.main.setBackgroundColor("#0f1115");
         this.physics.world.setBounds(0, 0, levelWidth, H);
 
         // HUD
@@ -177,23 +265,26 @@
         this.flag = this.physics.add.staticGroup();
         this.enemies = this.physics.add.group(); // dynamic
 
-        // Ground
+        // Ground (platform tiles)
         for (let x = 0; x < levelWidth; x += 64) {
-          const g = this.makeStaticRect(x + 32, H - 20, 64, 40, 0x2a2a2a);
-          this.platforms.add(g);
+          const ground = this.add.image(x + 32, H - 18, "platform64");
+          this.physics.add.existing(ground, true);
+          this.platforms.add(ground);
         }
 
         // Floating platforms
-        this.addPlatform(380, 380, 180, 20);
-        this.addPlatform(780, 320, 220, 20);
-        this.addPlatform(1260, 360, 220, 20);
-        this.addPlatform(1700, 320, 260, 20);
-        this.addPlatform(2200, 360, 220, 20);
+        this.addPlatform(380, 380, 180);
+        this.addPlatform(780, 320, 220);
+        this.addPlatform(1260, 360, 220);
+        this.addPlatform(1700, 320, 260);
+        this.addPlatform(2200, 360, 220);
 
-        // Player
-        this.player = this.makeDynamicRect(80, H - 80, 26, 34, 0x66ccff);
-        this.player.body.setCollideWorldBounds(true);
+        // Player (cell sprite)
+        this.player = this.physics.add.image(80, H - 90, "cellPlayer");
+        this.player.setCollideWorldBounds(true);
         this.player.body.setGravityY(800);
+        // Make collisions feel like Mario (smaller than the sprite)
+        this.player.body.setSize(28, 34, true);
 
         // Coins
         this.spawnCoin(220, H - 90);
@@ -212,8 +303,9 @@
         this.spawnQBlock(2050, 300, "qb3");
 
         // Flagpole
-        const flagRect = this.makeStaticRect(levelWidth - 150, H - 120, 18, 200, 0x00ff66);
-        this.flag.add(flagRect);
+        const flagImg = this.add.image(levelWidth - 150, H - 120, "flag18x200");
+        this.physics.add.existing(flagImg, true);
+        this.flag.add(flagImg);
 
         // Colliders
         this.physics.add.collider(this.player, this.platforms);
@@ -238,27 +330,36 @@
         this.updateHUD();
       }
 
-      addPlatform(x, y, w, h) {
-        const p = this.makeStaticRect(x, y, w, h, 0x444444);
-        this.platforms.add(p);
+      // Platforms made from repeated 64px tiles
+      addPlatform(x, y, widthPx) {
+        const segments = Math.max(1, Math.round(widthPx / 64));
+        const totalW = segments * 64;
+
+        for (let i = 0; i < segments; i++) {
+          const img = this.add.image(x - totalW / 2 + 32 + i * 64, y, "platform64");
+          this.physics.add.existing(img, true);
+          this.platforms.add(img);
+        }
       }
 
       spawnCoin(x, y) {
-        const c = this.makeStaticRect(x, y, 14, 14, 0xffdd55);
-        this.coins.add(c);
+        const coin = this.add.image(x, y, "coin20");
+        this.physics.add.existing(coin, true);
+        this.coins.add(coin);
       }
 
       spawnEnemy(x, y) {
-        const e = this.makeDynamicRect(x, y, 26, 26, 0xff6666);
-        this.enemies.add(e);
-        e.body.setGravityY(900);
-        e.body.setCollideWorldBounds(true);
-        e.body.setVelocityX(-80);
+        const enemy = this.physics.add.image(x, y, "enemy30");
+        enemy.body.setSize(26, 26, true);
+        enemy.body.setGravityY(900);
+        enemy.body.setCollideWorldBounds(true);
+        enemy.body.setVelocityX(-80);
+        this.enemies.add(enemy);
       }
 
       spawnQBlock(x, y, id) {
-        const qb = this.makeStaticRect(x, y, 26, 26, 0xddddff);
-        qb.setStrokeStyle(2, 0xffffff);
+        const qb = this.add.image(x, y, "qblock28");
+        this.physics.add.existing(qb, true);
         qb.qbId = id;
         qb.used = false;
         this.qblocks.add(qb);
@@ -294,7 +395,6 @@
         const playerFalling = player.body.velocity.y > 50;
         const playerAbove = player.y + 10 < enemy.y;
 
-        // Stomp
         if (playerFalling && playerAbove) {
           enemy.destroy();
           player.body.setVelocityY(-260);
@@ -302,7 +402,6 @@
           return;
         }
 
-        // Take damage
         if (!this.infiniteLives) this.lives -= 1;
 
         player.body.setVelocityX(player.x < enemy.x ? -220 : 220);
@@ -316,12 +415,11 @@
       onQBlock(player, qb) {
         if (qb.used) return;
 
-        // Hit from below like Mario
         const hitFromBelow = player.body.velocity.y < -50 && player.y > qb.y;
         if (!hitFromBelow) return;
 
         qb.used = true;
-        qb.fillColor = 0x777799;
+        qb.setAlpha(0.55);
 
         const q = questionBank.questions[this.qIndex % questionBank.questions.length];
         this.qIndex++;
@@ -400,5 +498,3 @@
     }[c]));
   }
 })();
-
-
