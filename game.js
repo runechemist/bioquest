@@ -1,4 +1,4 @@
-/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS - FIXED HITBOXES + ENEMIES)
+/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS - FIXED HITBOXES + ENEMIES MOVE)
    Works on GitHub Pages.
 
    Visual upgrades:
@@ -8,8 +8,8 @@
    - Coins and Q-blocks use textures
 
    Gameplay fixes:
-   - Enemies reliably move/patrol and recover if they stall
-   - Q-blocks have solid collision on top/sides (stand on them)
+   - Enemies reliably move/patrol (created via physics group create)
+   - Q-blocks are SOLID (stand on them / collide sides)
    - Questions trigger ONLY when hit from below (Mario-style)
 
    Files expected:
@@ -187,7 +187,7 @@
           c.destroy();
         }
 
-        // Q-block (28x28) - line-based "?" for compatibility
+        // Q-block (28x28)
         {
           const q = this.make.graphics({ x: 0, y: 0, add: false });
           q.fillStyle(0xdedcff, 1);
@@ -264,8 +264,12 @@
         this.qblocks = this.physics.add.staticGroup();
         this.flag = this.physics.add.staticGroup();
 
-        // IMPORTANT: enemies as physics group for reliable movement/collisions
-        this.enemies = this.physics.add.group({ allowGravity: true, immovable: false });
+        // Enemies: configure as Arcade Sprites and create through group.create()
+        this.enemies = this.physics.add.group({
+          classType: Phaser.Physics.Arcade.Sprite,
+          allowGravity: true,
+          immovable: false
+        });
 
         // Ground tiles
         for (let x = 0; x < levelWidth; x += 64) {
@@ -312,11 +316,8 @@
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.enemies, this.platforms);
 
-        // Q-blocks should be SOLID (stand on them, hit sides)
-        // Trigger questions only when hit from below
+        // Q-blocks solid + trigger on bottom-hit
         this.physics.add.collider(this.player, this.qblocks, this.onQBlockCollide, null, this);
-
-        // Optional: enemies also collide with Q-blocks
         this.physics.add.collider(this.enemies, this.qblocks);
 
         // Overlaps
@@ -354,23 +355,26 @@
         this.coins.add(coin);
       }
 
+      // IMPORTANT: create enemy THROUGH the physics group so Arcade movement works reliably
       spawnEnemy(x, y) {
-        const enemy = this.physics.add.image(x, y, "enemy30");
-        enemy.body.setSize(26, 26, true);
-        enemy.body.setGravityY(900);
-        enemy.body.setCollideWorldBounds(true);
+        const enemy = this.enemies.create(x, y, "enemy30");
 
-        // Force initial motion
+        enemy.setCollideWorldBounds(true);
+        enemy.body.setAllowGravity(true);
+        enemy.body.setImmovable(false);
+        enemy.body.setGravityY(900);
+        enemy.body.setDrag(0, 0);
+
         enemy.body.setVelocityX(-80);
         enemy.body.setMaxVelocity(200, 1000);
+        enemy.body.setSize(26, 26, true);
 
-        this.enemies.add(enemy);
         return enemy;
       }
 
       spawnQBlock(x, y, id) {
         const qb = this.add.image(x, y, "qblock28");
-        this.physics.add.existing(qb, true); // static solid body
+        this.physics.add.existing(qb, true);
         qb.qbId = id;
         qb.used = false;
         this.qblocks.add(qb);
@@ -387,7 +391,7 @@
         const onGround = this.player.body.blocked.down;
         if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
 
-        // Enemy patrol and anti-stall
+        // Enemy patrol + anti-stall
         this.enemies.children.iterate(e => {
           if (!e?.body) return;
 
@@ -427,8 +431,7 @@
         }
       }
 
-      // Collider callback so Q-blocks are SOLID.
-      // Trigger questions only when player hits the block from below.
+      // Collider callback: Q-blocks are solid; question triggers only on bottom-hit.
       onQBlockCollide(player, qb) {
         if (qb.used) return;
 
