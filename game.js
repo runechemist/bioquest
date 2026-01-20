@@ -1,7 +1,7 @@
 /* BioQuest MVP - game.js (FULL FILE)
    Polished visuals + in-game question panel + EXPLANATIONS + show correct answer
    + CONFIRM BUTTON after answering
-   + NEW: IN-GAME RESULTS SCREEN (replaces end-of-level alert())
+   + IN-GAME RESULTS SCREEN (replaces end-of-level alert())
 
    Question JSON supports (recommended):
    {
@@ -145,6 +145,7 @@
         if (data && Number.isFinite(data.attempt)) this.attempt = data.attempt;
       }
 
+      // ---------- Procedural textures ----------
       createProceduralTextures() {
         if (this.textures.exists("cellPlayer")) return;
 
@@ -275,52 +276,63 @@
           immovable: false
         });
 
+        // Ground tiles
         for (let x = 0; x < levelWidth; x += 64) {
           const ground = this.add.image(x + 32, H - 18, "platform64");
           this.physics.add.existing(ground, true);
           this.platforms.add(ground);
         }
 
+        // Floating platforms
         this.addPlatform(380, 380, 180);
         this.addPlatform(780, 320, 220);
         this.addPlatform(1260, 360, 220);
         this.addPlatform(1700, 320, 260);
         this.addPlatform(2200, 360, 220);
 
+        // Player
         this.player = this.physics.add.image(80, H - 90, "cellPlayer");
         this.player.setCollideWorldBounds(true);
         this.player.body.setGravityY(800);
         this.player.body.setSize(28, 34, true);
 
+        // Coins
         this.spawnCoin(220, H - 90);
         this.spawnCoin(420, 340);
         this.spawnCoin(820, 280);
         this.spawnCoin(1760, 280);
 
+        // Enemies
         this.spawnEnemy(520, H - 45);
         this.spawnEnemy(980, H - 45);
         this.spawnEnemy(1500, H - 45);
 
+        // Q-blocks
         this.spawnQBlock(320, 300, "qb1");
         this.spawnQBlock(1100, 300, "qb2");
         this.spawnQBlock(2050, 300, "qb3");
 
+        // Flag
         const flagImg = this.add.image(levelWidth - 150, H - 120, "flag18x200");
         this.physics.add.existing(flagImg, true);
         this.flag.add(flagImg);
 
+        // Colliders
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.enemies, this.platforms);
         this.physics.add.collider(this.player, this.qblocks, this.onQBlockCollide, null, this);
         this.physics.add.collider(this.enemies, this.qblocks);
 
+        // Overlaps
         this.physics.add.overlap(this.player, this.coins, this.onCoin, null, this);
         this.physics.add.overlap(this.player, this.enemies, this.onEnemy, null, this);
         this.physics.add.overlap(this.player, this.flag, this.onWin, null, this);
 
+        // Camera
         this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
         this.cameras.main.setBounds(0, 0, levelWidth, H);
 
+        // Controls
         this.cursors = this.input.keyboard.createCursorKeys();
         this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
         this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
@@ -333,10 +345,10 @@
         this.updateHUD();
       }
 
+      // ---------- Level helpers ----------
       addPlatform(x, y, widthPx) {
         const segments = Math.max(1, Math.round(widthPx / 64));
         const totalW = segments * 64;
-
         for (let i = 0; i < segments; i++) {
           const img = this.add.image(x - totalW / 2 + 32 + i * 64, y, "platform64");
           this.physics.add.existing(img, true);
@@ -378,9 +390,7 @@
         this.qblocks.add(qb);
       }
 
-      // -----------------------------
-      // Question Modal (explanation + Continue)
-      // -----------------------------
+      // ---------- Question UI ----------
       buildQuestionUI() {
         const W = 960;
         const H = 540;
@@ -571,16 +581,19 @@
         const isCorrect = (choiceIndex === q.answerIndex);
         if (isCorrect) this.correct += 1;
 
+        // Highlight correct in green
         const correctBtn = ui.choices[q.answerIndex];
         correctBtn.bg.setFillStyle(0x16351e, 1);
         correctBtn.bg.setStrokeStyle(2, 0x34c76a, 1);
 
+        // If wrong, chosen in red
         if (!isCorrect) {
           const chosen = ui.choices[choiceIndex];
           chosen.bg.setFillStyle(0x3a1414, 1);
           chosen.bg.setStrokeStyle(2, 0xff6b6b, 1);
         }
 
+        // Explanation (fallback to correct answer if missing)
         const expl = (typeof q.explanation === "string") ? q.explanation.trim() : "";
         const correctText = (q.choices && q.choices[q.answerIndex] != null) ? String(q.choices[q.answerIndex]) : "";
 
@@ -616,9 +629,7 @@
         ui.locked = false;
       }
 
-      // -----------------------------
-      // Results Screen (replaces alert)
-      // -----------------------------
+      // ---------- Results UI ----------
       buildResultsUI() {
         const W = 960;
         const H = 540;
@@ -655,7 +666,7 @@
         tip.setFixedSize(720, 40);
 
         const makeBtn = (x, y, label) => {
-          const bw = 240, bh = 52;
+          const bw = 300, bh = 52;
           const bg = this.add.rectangle(x, y, bw, bh, 0x1e2431, 1)
             .setScrollFactor(0).setDepth(2002).setVisible(false);
           bg.setStrokeStyle(2, 0x2f3a50, 1);
@@ -665,4 +676,308 @@
             fontFamily: "monospace",
             fontSize: "14px",
             color: "#ffffff"
-          }).setOrigin(0.5).setScro
+          }).setOrigin(0.5).setScrollFactor(0).setDepth(2003).setVisible(false);
+
+          bg.on("pointerover", () => { if (this.isResultsOpen) bg.setFillStyle(0x252c3d, 1); });
+          bg.on("pointerout", () => { if (this.isResultsOpen) bg.setFillStyle(0x1e2431, 1); });
+
+          return { bg, txt };
+        };
+
+        const primary = makeBtn(W / 2, H / 2 + 170, "Retry (R / Enter)");
+        const secondary = makeBtn(W / 2, H / 2 + 235, "Return to Start (M)");
+
+        this._resultsKeys = this.input.keyboard.addKeys({
+          enter: Phaser.Input.Keyboard.KeyCodes.ENTER,
+          space: Phaser.Input.Keyboard.KeyCodes.SPACE,
+          r: Phaser.Input.Keyboard.KeyCodes.R,
+          m: Phaser.Input.Keyboard.KeyCodes.M
+        });
+
+        primary.bg.on("pointerdown", () => { if (this.isResultsOpen) this.onResultsPrimary(); });
+        secondary.bg.on("pointerdown", () => { if (this.isResultsOpen) this.onResultsMenu(); });
+
+        this.resultsUI = {
+          overlay, panel, title, body, tip,
+          primary, secondary,
+          lastResult: null,
+          nextAttempt: null,
+          primaryMode: "retry"
+        };
+      }
+
+      openResults(result) {
+        if (this.isResultsOpen) return;
+        this.isResultsOpen = true;
+
+        if (this.isQuestionOpen) this.closeQuestion();
+        this.physics.world.pause();
+
+        const ui = this.resultsUI;
+        ui.lastResult = result;
+
+        const durationSec = Math.max(0, Math.round((result.durationMs || 0) / 1000));
+        const mastered = !!result.masteryMet;
+
+        let primaryLabel = "Play Again (Enter)";
+        let tipText = "Press Enter/R to replay, or M to return to start.";
+
+        if (session.mode === "assessment") {
+          if (!mastered && this.attempt < this.attemptsAllowed) {
+            ui.primaryMode = "retry_attempt";
+            ui.nextAttempt = this.attempt + 1;
+            primaryLabel = `Retry Attempt ${ui.nextAttempt}/${this.attemptsAllowed} (Enter/R)`;
+            tipText = "You can retry to reach mastery.";
+          } else {
+            ui.primaryMode = "done";
+            ui.nextAttempt = null;
+            primaryLabel = "Play Again (Enter)";
+            tipText = mastered ? "Mastery met. You may replay for practice." : "No attempts remaining. You may replay for practice.";
+          }
+        } else {
+          ui.primaryMode = "practice";
+          ui.nextAttempt = null;
+        }
+
+        ui.primary.txt.setText(primaryLabel);
+
+        ui.body.setText(
+          `Completed: ${result.completed}\n` +
+          `Reason: ${result.reason}\n\n` +
+          `Accuracy: ${result.accuracy}% (Mastery: ${this.masteryAccuracy}%)\n` +
+          `Questions: ${result.correct}/${result.answered}\n` +
+          `Score: ${result.score}\n` +
+          `Time: ${durationSec}s\n` +
+          (this.infiniteLives ? "" : `Lives Remaining: ${result.livesRemaining}\n`) +
+          `Attempt Logged: ${result.attempt}/${this.attemptsAllowed}\n\n` +
+          (mastered ? "✅ Mastery Met" : "❌ Mastery Not Met")
+        );
+
+        ui.tip.setText(tipText);
+
+        ui.overlay.setVisible(true);
+        ui.panel.setVisible(true);
+        ui.title.setVisible(true);
+        ui.body.setVisible(true);
+        ui.tip.setVisible(true);
+        ui.primary.bg.setVisible(true);
+        ui.primary.txt.setVisible(true);
+        ui.secondary.bg.setVisible(true);
+        ui.secondary.txt.setVisible(true);
+      }
+
+      closeResults() {
+        if (!this.isResultsOpen) return;
+        this.isResultsOpen = false;
+
+        const ui = this.resultsUI;
+        ui.overlay.setVisible(false);
+        ui.panel.setVisible(false);
+        ui.title.setVisible(false);
+        ui.body.setVisible(false);
+        ui.tip.setVisible(false);
+        ui.primary.bg.setVisible(false);
+        ui.primary.txt.setVisible(false);
+        ui.secondary.bg.setVisible(false);
+        ui.secondary.txt.setVisible(false);
+
+        ui.lastResult = null;
+        ui.nextAttempt = null;
+
+        this.physics.world.resume();
+      }
+
+      onResultsPrimary() {
+        const ui = this.resultsUI;
+        if (!ui || !ui.lastResult) return;
+
+        this.closeResults();
+
+        if (session.mode === "assessment" && ui.primaryMode === "retry_attempt" && Number.isFinite(ui.nextAttempt)) {
+          this.scene.restart({ attempt: ui.nextAttempt });
+          return;
+        }
+
+        this.scene.restart({ attempt: 1 });
+      }
+
+      onResultsMenu() {
+        window.location.reload();
+      }
+
+      // ---------- Update loop ----------
+      update() {
+        // Results screen input
+        if (this.isResultsOpen) {
+          const k = this._resultsKeys;
+          if (k) {
+            if (Phaser.Input.Keyboard.JustDown(k.enter) || Phaser.Input.Keyboard.JustDown(k.space) || Phaser.Input.Keyboard.JustDown(k.r)) {
+              this.onResultsPrimary();
+            }
+            if (Phaser.Input.Keyboard.JustDown(k.m)) {
+              this.onResultsMenu();
+            }
+          }
+          this.updateHUD();
+          return;
+        }
+
+        // Question modal input
+        if (this.isQuestionOpen) {
+          const k = this._questionKeys;
+          const ui = this.questionUI;
+
+          if (k && ui) {
+            if (!ui.answered) {
+              if (Phaser.Input.Keyboard.JustDown(k.one) || Phaser.Input.Keyboard.JustDown(k.n1)) this.submitChoice(0);
+              if (Phaser.Input.Keyboard.JustDown(k.two) || Phaser.Input.Keyboard.JustDown(k.n2)) this.submitChoice(1);
+              if (Phaser.Input.Keyboard.JustDown(k.three) || Phaser.Input.Keyboard.JustDown(k.n3)) this.submitChoice(2);
+              if (Phaser.Input.Keyboard.JustDown(k.four) || Phaser.Input.Keyboard.JustDown(k.n4)) this.submitChoice(3);
+            } else {
+              if (Phaser.Input.Keyboard.JustDown(k.enter) || Phaser.Input.Keyboard.JustDown(k.space)) {
+                this.confirmCloseQuestion();
+              }
+            }
+          }
+
+          this.updateHUD();
+          return;
+        }
+
+        // Normal gameplay
+        const left = this.cursors.left.isDown || this.keyA.isDown;
+        const right = this.cursors.right.isDown || this.keyD.isDown;
+
+        if (left) this.player.body.setVelocityX(-220);
+        else if (right) this.player.body.setVelocityX(220);
+        else this.player.body.setVelocityX(0);
+
+        const onGround = this.player.body.blocked.down;
+        if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
+
+        // Enemy patrol
+        this.enemies.children.iterate(e => {
+          if (!e?.body) return;
+
+          if (Math.abs(e.body.velocity.x) < 5) {
+            const dir = (e.x <= (e.patrolMinX + 5)) ? 1 : -1;
+            e.body.setVelocityX(dir * this.enemySpeed);
+          }
+
+          if (e.x <= e.patrolMinX) e.body.setVelocityX(this.enemySpeed);
+          if (e.x >= e.patrolMaxX) e.body.setVelocityX(-this.enemySpeed);
+
+          if (e.body.blocked.left || e.body.touching.left) e.body.setVelocityX(this.enemySpeed);
+          if (e.body.blocked.right || e.body.touching.right) e.body.setVelocityX(-this.enemySpeed);
+
+          if (e.y > this.physics.world.bounds.height + 100) {
+            e.y = 200;
+            e.x = (e.patrolMinX + e.patrolMaxX) / 2;
+            e.body.setVelocityX(-this.enemySpeed);
+          }
+        });
+
+        this.updateHUD();
+      }
+
+      // ---------- Interactions ----------
+      onCoin(player, coin) {
+        coin.destroy();
+        this.score += 10;
+      }
+
+      onEnemy(player, enemy) {
+        const playerFalling = player.body.velocity.y > 50;
+        const playerAbove = player.y + 10 < enemy.y;
+
+        // stomp
+        if (playerFalling && playerAbove) {
+          enemy.destroy();
+          player.body.setVelocityY(-260);
+          this.score += 25;
+          return;
+        }
+
+        // damage
+        if (!this.infiniteLives) this.lives -= 1;
+
+        player.body.setVelocityX(player.x < enemy.x ? -220 : 220);
+        player.body.setVelocityY(-260);
+
+        if (!this.infiniteLives && this.lives <= 0) {
+          this.endAttempt(false, "out_of_lives");
+        }
+      }
+
+      onQBlockCollide(player, qb) {
+        if (qb.used) return;
+
+        const hitFromBelow = player.body.touching.up && qb.body.touching.down;
+        if (!hitFromBelow) return;
+
+        qb.used = true;
+        qb.setAlpha(0.55);
+
+        const q = questionBank.questions[this.qIndex % questionBank.questions.length];
+        this.qIndex++;
+
+        this.openQuestion(q, qb);
+      }
+
+      onWin() {
+        if (this.isQuestionOpen || this.isResultsOpen) return;
+        this.endAttempt(true, "completed");
+      }
+
+      // ---------- End attempt (results screen) ----------
+      endAttempt(completed, reason) {
+        if (this.isResultsOpen) return;
+
+        if (this.isQuestionOpen) this.closeQuestion();
+
+        const ms = Date.now() - this.levelStartMs;
+        const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
+
+        const result = {
+          levelId: questionBank.levelId || "world1-1",
+          completed,
+          reason,
+          score: this.score,
+          answered: this.answered,
+          correct: this.correct,
+          accuracy,
+          livesRemaining: this.infiniteLives ? null : this.lives,
+          attempt: this.attempt,
+          durationMs: ms,
+          atISO: new Date().toISOString(),
+          masteryMet: accuracy >= this.masteryAccuracy
+        };
+
+        try {
+          BQ.writeResult(session.classCode, session.studentId, result);
+        } catch (e) {
+          console.error("BQ.writeResult failed", e);
+        }
+
+        this.openResults(result);
+      }
+
+      updateHUD() {
+        const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
+        const lifeText = this.infiniteLives ? "∞" : String(this.lives);
+        const attemptText = (session.mode === "assessment") ? `   Attempt ${this.attempt}/${this.attemptsAllowed}` : "";
+        this.hud.setText(`Score ${this.score}   Lives ${lifeText}   Acc ${accuracy}%   Q ${this.correct}/${this.answered}${attemptText}`);
+      }
+    };
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;"
+    }[c]));
+  }
+})();
