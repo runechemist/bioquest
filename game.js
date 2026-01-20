@@ -1,103 +1,104 @@
-/* BioQuest MVP - game.js (FULL FILE)
-   Adds: MASTERY GATE for flagpole (must answer N questions AND meet mastery accuracy)
-   - HUD shows flag status: LOCKED/UNLOCKED and progress
-   - If player touches flag while locked, shows a brief on-screen message (no end)
-   - Default requirement: 3 questions answered (change REQUIRED_QUESTIONS below)
+/* BioQuest - game.js (FULL FILE)
+   Multi-level support driven by index.html selection.
 
-   Requires:
-   - /shared/storage.js
-   - /data/questions_world1-1.json
+   Reads session boot info from:
+     window.BIOQUEST_SESSION_BOOT = { classCode, studentId, mode, levelId }
+
+   Loads questions from:
+     ./data/questions_<levelId>.json
+     Examples:
+       questions_world1-1.json
+       questions_world1-2.json
+       questions_world1-3.json
+
+   Level JSON format (recommended):
+   {
+     "levelId": "world1-1",
+     "requiredQuestions": 3,
+     "masteryAccuracy": 70,   // optional override; otherwise class settings used
+     "questions": [
+       { "prompt": "...", "choices": ["...","...","...","..."], "answerIndex": 0, "explanation": "..." }
+     ]
+   }
+
+   Completion is ALWAYS possible:
+     - Flag unlocks after requiredQuestions are answered (finishable)
+     - Mastery is still tracked for grading (passable)
+
+   Unlock progression (completion-based):
+     world1-1 -> world1-2 -> world1-3
 */
 
 (() => {
-  const UI = document.getElementById("ui");
-
-  function uiTemplate() {
-    UI.innerHTML = `
-      <div class="panel">
-        <div class="row">
-          <div>
-            <label>Class Code</label>
-            <input id="classCode" placeholder="e.g., AB3K9Q" maxlength="12" />
-            <div class="small">Teacher creates this code in the dashboard.</div>
-          </div>
-          <div>
-            <label>Student ID (nickname or last-4)</label>
-            <input id="studentId" placeholder="e.g., MARLIN123 or 4821" maxlength="24" />
-            <div class="small">Use a non-identifying nickname if desired.</div>
-          </div>
-          <div>
-            <label>Mode</label>
-            <select id="mode">
-              <option value="assessment">Assessment</option>
-              <option value="practice">Practice</option>
-            </select>
-            <div class="small">Assessment uses attempts/lives; Practice can be infinite.</div>
-          </div>
+  // ---------- Boot: read session from index.html ----------
+  const boot = window.BIOQUEST_SESSION_BOOT || null;
+  if (!boot || !boot.classCode || !boot.studentId || !boot.mode) {
+    // If someone opens the page without going through the index UI,
+    // show a clear message instead of a blank screen.
+    const ui = document.getElementById("ui");
+    if (ui) {
+      ui.innerHTML = `
+        <div class="panel">
+          <div class="small">Start the game from the level select screen.</div>
+          <div class="small">If you see this on GitHub Pages, refresh and select a level.</div>
         </div>
-        <div class="row">
-          <button id="startBtn">Start World 1-1</button>
-        </div>
-        <div class="small">
-          Controls: A/D or ◀▶ to move. ▲ to jump. Stomp enemies from above. Answer with buttons or 1–4 keys.
-        </div>
-      </div>
-    `;
+      `;
+    }
+    return;
   }
 
-  uiTemplate();
+  const session = {
+    classCode: String(boot.classCode).trim().toUpperCase(),
+    studentId: String(boot.studentId).trim(),
+    mode: boot.mode === "practice" ? "practice" : "assessment",
+    levelId: String(boot.levelId || "world1-1").trim()
+  };
 
-  const startBtn = document.getElementById("startBtn");
-  startBtn.addEventListener("click", onStart);
-
-  async function onStart() {
-    const classCode = (document.getElementById("classCode").value || "").trim().toUpperCase();
-    const studentId = (document.getElementById("studentId").value || "").trim();
-    const mode = document.getElementById("mode").value;
-
-    if (!classCode || !studentId) {
-      alert("Enter Class Code and Student ID.");
-      return;
-    }
+  // ---------- Load class settings + level question data, then start Phaser ----------
+  (async () => {
     if (!window.BQ) {
       alert("Storage library not loaded. Ensure shared/storage.js is included before game.js.");
       return;
     }
 
-    const settings = BQ.getClassSettings(classCode);
+    const classSettings = BQ.getClassSettings(session.classCode);
 
-    let questionBank;
+    // Load per-level JSON
+    let levelData;
     try {
-      const res = await fetch("./data/questions_world1-1.json", { cache: "no-store" });
-      if (!res.ok) throw new Error(`questions_world1-1.json HTTP ${res.status}`);
-      questionBank = await res.json();
-      if (!questionBank?.questions?.length) throw new Error("Question bank is empty or malformed.");
+      const path = `./data/questions_${session.levelId}.json`;
+      const res = await fetch(path, { cache: "no-store" });
+      if (!res.ok) throw new Error(`${path} HTTP ${res.status}`);
+      levelData = await res.json();
+      if (!levelData?.questions?.length) throw new Error("Question bank is empty or malformed.");
     } catch (e) {
       console.error(e);
-      alert("Game failed to load question data.\n\n" + e.message);
+      alert("Game failed to load level data.\n\n" + e.message);
       return;
     }
 
-    const session = {
-      classCode,
-      studentId,
-      mode,
-      settings,
-      startedAtISO: new Date().toISOString()
+    // Merge settings: level overrides > class settings > defaults
+    const mergedSettings = {
+      classCode: session.classCode,
+      masteryAccuracy: Number(levelData.masteryAccuracy ?? classSettings.masteryAccuracy ?? 70),
+      attemptsAllowed: Number(classSettings.attemptsAllowed ?? 3),
+      infiniteLives: (session.mode === "practice") ? true : !!classSettings.infiniteLives
     };
 
-    UI.innerHTML = `
-      <div class="panel">
-        <span class="badge">Class ${escapeHtml(classCode)}</span>
-        <span class="badge">Student ${escapeHtml(studentId)}</span>
-        <span class="badge">${escapeHtml(mode)}</span>
-      </div>
-    `;
+    const runtime = {
+      session,
+      settings: mergedSettings,
+      level: {
+        levelId: String(levelData.levelId || session.levelId || "world1-1"),
+        requiredQuestions: Number(levelData.requiredQuestions ?? 3),
+        questions: levelData.questions
+      }
+    };
 
-    startGame(session, questionBank);
-  }
+    startGame(runtime);
+  })();
 
-  function startGame(session, questionBank) {
+  function startGame(runtime) {
     const config = {
       type: Phaser.AUTO,
       parent: "game",
@@ -107,20 +108,31 @@
         default: "arcade",
         arcade: { debug: false, gravity: { y: 0 } }
       },
-      scene: [makeScene(session, questionBank)]
+      scene: [makeScene(runtime)]
     };
 
     if (window.__bioquestGame) window.__bioquestGame.destroy(true);
     window.__bioquestGame = new Phaser.Game(config);
   }
 
-  function makeScene(session, questionBank) {
+  // ---------- Level progression ----------
+  function nextLevelId(current) {
+    const order = ["world1-1", "world1-2", "world1-3"];
+    const i = order.indexOf(current);
+    if (i === -1) return null;
+    return order[i + 1] || null;
+  }
+
+  function makeScene(runtime) {
+    const { session, settings, level } = runtime;
+
     return class BioQuestScene extends Phaser.Scene {
       constructor() {
         super("BioQuestScene");
 
-        // ---- Mastery gate settings ----
-        this.REQUIRED_QUESTIONS = 3; // change this to 5, etc. if desired
+        // Gate: finishable after requiredQuestions (mastery is separate)
+        this.REQUIRED_QUESTIONS = Math.max(1, Number(level.requiredQuestions || 3));
+        this.masteryAccuracy = Number(settings.masteryAccuracy ?? 70);
 
         this.score = 0;
         this.correct = 0;
@@ -137,6 +149,8 @@
         this.isResultsOpen = false;
 
         this.flagUnlocked = false;
+        this.masteryMetNow = false;
+
         this.flagMessageUntil = 0;
       }
 
@@ -248,10 +262,8 @@
         const H = 540;
         const levelWidth = 3000;
 
-        const s = session.settings || {};
-        this.infiniteLives = (session.mode === "practice") ? true : !!s.infiniteLives;
-        this.masteryAccuracy = Number(s.masteryAccuracy ?? 70);
-        this.attemptsAllowed = Number(s.attemptsAllowed ?? 3);
+        this.infiniteLives = !!settings.infiniteLives;
+        this.attemptsAllowed = Number(settings.attemptsAllowed ?? 3);
 
         this.createProceduralTextures();
 
@@ -264,12 +276,13 @@
           color: "#fff"
         }).setScrollFactor(0);
 
-        // Brief message when flag is locked
+        // brief message for locked flag
         this.flagMsg = this.add.text(480, 70, "", {
           fontFamily: "monospace",
           fontSize: "14px",
           color: "#cfe7ff",
-          align: "center"
+          align: "center",
+          wordWrap: { width: 920, useAdvancedWrap: true }
         }).setOrigin(0.5).setScrollFactor(0).setDepth(50).setVisible(false);
 
         this.platforms = this.physics.add.staticGroup();
@@ -283,41 +296,21 @@
           immovable: false
         });
 
-        // Ground tiles
+        // Ground
         for (let x = 0; x < levelWidth; x += 64) {
           const ground = this.add.image(x + 32, H - 18, "platform64");
           this.physics.add.existing(ground, true);
           this.platforms.add(ground);
         }
 
-        // Floating platforms
-        this.addPlatform(380, 380, 180);
-        this.addPlatform(780, 320, 220);
-        this.addPlatform(1260, 360, 220);
-        this.addPlatform(1700, 320, 260);
-        this.addPlatform(2200, 360, 220);
+        // Simple per-level layout tweaks
+        this.buildLevelLayout(session.levelId, H, levelWidth);
 
         // Player
         this.player = this.physics.add.image(80, H - 90, "cellPlayer");
         this.player.setCollideWorldBounds(true);
         this.player.body.setGravityY(800);
         this.player.body.setSize(28, 34, true);
-
-        // Coins
-        this.spawnCoin(220, H - 90);
-        this.spawnCoin(420, 340);
-        this.spawnCoin(820, 280);
-        this.spawnCoin(1760, 280);
-
-        // Enemies
-        this.spawnEnemy(520, H - 45);
-        this.spawnEnemy(980, H - 45);
-        this.spawnEnemy(1500, H - 45);
-
-        // Q-blocks (you can add more)
-        this.spawnQBlock(320, 300, "qb1");
-        this.spawnQBlock(1100, 300, "qb2");
-        this.spawnQBlock(2050, 300, "qb3");
 
         // Flag
         const flagImg = this.add.image(levelWidth - 150, H - 120, "flag18x200");
@@ -349,11 +342,90 @@
         this.buildResultsUI();
 
         this.levelStartMs = Date.now();
-        this.recomputeFlagUnlock();
+        this.recomputeGateState();
         this.updateHUD();
       }
 
-      // ---------- Level helpers ----------
+      buildLevelLayout(levelId, H, levelWidth) {
+        // Clear-ish defaults
+        const addCoin = (x, y) => this.spawnCoin(x, y);
+        const addEnemy = (x, y) => this.spawnEnemy(x, y);
+        const addQB = (x, y, id) => this.spawnQBlock(x, y, id);
+        const addPlat = (x, y, w) => this.addPlatform(x, y, w);
+
+        if (levelId === "world1-2") {
+          addPlat(360, 390, 180);
+          addPlat(720, 340, 200);
+          addPlat(1060, 290, 180);
+          addPlat(1440, 340, 240);
+          addPlat(1880, 300, 220);
+          addPlat(2320, 360, 220);
+
+          addCoin(240, H - 90);
+          addCoin(740, 300);
+          addCoin(1080, 250);
+          addCoin(1900, 260);
+
+          addEnemy(560, H - 45);
+          addEnemy(1180, H - 45);
+          addEnemy(1700, H - 45);
+
+          addQB(320, 300, "qb1");
+          addQB(980, 260, "qb2");
+          addQB(1600, 300, "qb3");
+          addQB(2200, 320, "qb4");
+          return;
+        }
+
+        if (levelId === "world1-3") {
+          addPlat(380, 380, 180);
+          addPlat(760, 330, 200);
+          addPlat(1120, 280, 200);
+          addPlat(1500, 330, 240);
+          addPlat(1940, 280, 220);
+          addPlat(2380, 330, 220);
+
+          addCoin(220, H - 90);
+          addCoin(780, 290);
+          addCoin(1140, 240);
+          addCoin(1960, 240);
+          addCoin(2400, 290);
+
+          addEnemy(520, H - 45);
+          addEnemy(920, H - 45);
+          addEnemy(1400, H - 45);
+          addEnemy(2100, H - 45);
+
+          addQB(320, 300, "qb1");
+          addQB(900, 270, "qb2");
+          addQB(1400, 300, "qb3");
+          addQB(1900, 270, "qb4");
+          addQB(2400, 300, "qb5");
+          return;
+        }
+
+        // world1-1 default
+        addPlat(380, 380, 180);
+        addPlat(780, 320, 220);
+        addPlat(1260, 360, 220);
+        addPlat(1700, 320, 260);
+        addPlat(2200, 360, 220);
+
+        addCoin(220, H - 90);
+        addCoin(420, 340);
+        addCoin(820, 280);
+        addCoin(1760, 280);
+
+        addEnemy(520, H - 45);
+        addEnemy(980, H - 45);
+        addEnemy(1500, H - 45);
+
+        addQB(320, 300, "qb1");
+        addQB(1100, 300, "qb2");
+        addQB(2050, 300, "qb3");
+      }
+
+      // ---------- Helpers ----------
       addPlatform(x, y, widthPx) {
         const segments = Math.max(1, Math.round(widthPx / 64));
         const totalW = segments * 64;
@@ -385,8 +457,8 @@
         const w = this.physics.world.bounds.width;
         enemy.patrolMinX = Math.max(20, x - this.enemyPatrolRange);
         enemy.patrolMaxX = Math.min(w - 20, x + this.enemyPatrolRange);
-
         enemy.body.setVelocityX(-this.enemySpeed);
+
         return enemy;
       }
 
@@ -398,39 +470,31 @@
         this.qblocks.add(qb);
       }
 
-      // ---------- Mastery gate logic ----------
-      recomputeFlagUnlock() {
-        const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
-        const questionsMet = this.answered >= this.REQUIRED_QUESTIONS;
-         this.flagUnlocked = questionsMet; // finishable
-         this.masteryMetNow = (accuracy >= this.masteryAccuracy); // tracked for results only
+      // ---------- Gate logic (finishable) ----------
+      recomputeGateState() {
+        const acc = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
+        this.masteryMetNow = acc >= this.masteryAccuracy;
 
+        // finishable: only requires questions
+        this.flagUnlocked = this.answered >= this.REQUIRED_QUESTIONS;
       }
 
       showFlagLockedMessage() {
         const needQ = Math.max(0, this.REQUIRED_QUESTIONS - this.answered);
-        const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
         const msg =
-          `Flag is locked.\n` +
-          `Need: ${needQ} more question(s) AND mastery (${this.masteryAccuracy}%).\n` +
-          `Current accuracy: ${accuracy}%`;
+          `Flag is locked. Answer ${needQ} more question(s) to finish this level.`;
 
         this.flagMsg.setText(msg);
         this.flagMsg.setVisible(true);
-        this.flagMessageUntil = Date.now() + 1800;
+        this.flagMessageUntil = Date.now() + 1600;
       }
 
       // ---------- Question UI ----------
       buildQuestionUI() {
-        const W = 960;
-        const H = 540;
+        const W = 960, H = 540;
 
-        const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0x0, 0.55)
+        const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.55)
           .setScrollFactor(0).setDepth(1000).setVisible(false);
-
-        // NOTE: Phaser rectangle uses (x,y,w,h,fillColor,fillAlpha) signature.
-        // Some builds accept (fillColor, fillAlpha). To stay safe:
-        overlay.setFillStyle(0x000000, 0.55);
 
         const panel = this.add.rectangle(W / 2, H / 2, 820, 480, 0x141821, 0.95)
           .setScrollFactor(0).setDepth(1001).setVisible(false);
@@ -464,8 +528,7 @@
           color: "#ffffff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
 
-        const btnW = 220, btnH = 48;
-        const continueBg = this.add.rectangle(W / 2, H / 2 + 255, btnW, btnH, 0x1e2431, 1)
+        const continueBg = this.add.rectangle(W / 2, H / 2 + 255, 220, 48, 0x1e2431, 1)
           .setScrollFactor(0).setDepth(1002).setVisible(false);
         continueBg.setStrokeStyle(2, 0x2f3a50, 1);
         continueBg.setInteractive({ useHandCursor: true });
@@ -478,7 +541,6 @@
 
         const makeChoiceButton = (i, y) => {
           const bw = 760, bh = 64;
-
           const bg = this.add.rectangle(W / 2, y, bw, bh, 0x1e2431, 1)
             .setScrollFactor(0).setDepth(1002).setVisible(false);
           bg.setStrokeStyle(2, 0x2f3a50, 1);
@@ -535,7 +597,6 @@
       openQuestion(q, qbRef) {
         if (this.isQuestionOpen || this.isResultsOpen) return;
         this.isQuestionOpen = true;
-
         this.physics.world.pause();
 
         const ui = this.questionUI;
@@ -547,7 +608,6 @@
         ui.feedbackText.setText("");
         ui.explanationText.setText("");
         ui.explanationText.setVisible(false);
-
         ui.continueBg.setVisible(false);
         ui.continueLabel.setVisible(false);
 
@@ -596,8 +656,7 @@
 
         this.physics.world.resume();
 
-        // Recompute mastery gate after each question closes
-        this.recomputeFlagUnlock();
+        this.recomputeGateState();
       }
 
       submitChoice(choiceIndex) {
@@ -618,19 +677,17 @@
         const isCorrect = (choiceIndex === q.answerIndex);
         if (isCorrect) this.correct += 1;
 
-        // Highlight correct in green
+        // highlight correct
         const correctBtn = ui.choices[q.answerIndex];
         correctBtn.bg.setFillStyle(0x16351e, 1);
         correctBtn.bg.setStrokeStyle(2, 0x34c76a, 1);
 
-        // If wrong, chosen in red
         if (!isCorrect) {
           const chosen = ui.choices[choiceIndex];
           chosen.bg.setFillStyle(0x3a1414, 1);
           chosen.bg.setStrokeStyle(2, 0xff6b6b, 1);
         }
 
-        // Explanation (fallback to correct answer if missing)
         const expl = (typeof q.explanation === "string") ? q.explanation.trim() : "";
         const correctText = (q.choices && q.choices[q.answerIndex] != null) ? String(q.choices[q.answerIndex]) : "";
 
@@ -668,39 +725,38 @@
 
       // ---------- Results UI ----------
       buildResultsUI() {
-        const W = 960;
-        const H = 540;
+        const W = 960, H = 540;
 
         const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6)
           .setScrollFactor(0).setDepth(2000).setVisible(false);
 
-        const panel = this.add.rectangle(W / 2, H / 2, 780, 420, 0x141821, 0.97)
+        const panel = this.add.rectangle(W / 2, H / 2, 780, 440, 0x141821, 0.97)
           .setScrollFactor(0).setDepth(2001).setVisible(false);
         panel.setStrokeStyle(2, 0x2a3242, 1);
 
-        const title = this.add.text(W / 2, H / 2 - 170, "Level Results", {
+        const title = this.add.text(W / 2, H / 2 - 185, "Level Results", {
           fontFamily: "monospace",
           fontSize: "22px",
           color: "#cfe7ff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(2002).setVisible(false);
 
-        const body = this.add.text(W / 2, H / 2 - 120, "", {
+        const body = this.add.text(W / 2, H / 2 - 140, "", {
           fontFamily: "monospace",
           fontSize: "16px",
           color: "#ffffff",
           align: "center",
           wordWrap: { width: 720, useAdvancedWrap: true }
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(2002).setVisible(false);
-        body.setFixedSize(720, 220);
+        body.setFixedSize(720, 240);
 
-        const tip = this.add.text(W / 2, H / 2 + 110, "", {
+        const tip = this.add.text(W / 2, H / 2 + 115, "", {
           fontFamily: "monospace",
           fontSize: "14px",
           color: "#cfe7ff",
           align: "center",
           wordWrap: { width: 720, useAdvancedWrap: true }
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(2002).setVisible(false);
-        tip.setFixedSize(720, 40);
+        tip.setFixedSize(720, 42);
 
         const makeBtn = (x, y, label) => {
           const bw = 300, bh = 52;
@@ -721,8 +777,8 @@
           return { bg, txt };
         };
 
-        const primary = makeBtn(W / 2, H / 2 + 170, "Retry (R / Enter)");
-        const secondary = makeBtn(W / 2, H / 2 + 235, "Return to Start (M)");
+        const primary = makeBtn(W / 2, H / 2 + 175, "Retry (R / Enter)");
+        const secondary = makeBtn(W / 2, H / 2 + 240, "Return to Level Select (M)");
 
         this._resultsKeys = this.input.keyboard.addKeys({
           enter: Phaser.Input.Keyboard.KeyCodes.ENTER,
@@ -750,6 +806,14 @@
         if (this.isQuestionOpen) this.closeQuestion();
         this.physics.world.pause();
 
+        // Unlock next level on COMPLETION
+        if (result.completed) {
+          const nextId = nextLevelId(result.levelId);
+          if (nextId && typeof window.unlockLevel === "function") {
+            try { window.unlockLevel(nextId); } catch (e) { console.warn("unlockLevel failed", e); }
+          }
+        }
+
         const ui = this.resultsUI;
         ui.lastResult = result;
 
@@ -757,14 +821,14 @@
         const mastered = !!result.masteryMet;
 
         let primaryLabel = "Play Again (Enter)";
-        let tipText = "Press Enter/R to replay, or M to return to start.";
+        let tipText = "Press Enter/R to replay, or M to return to level select.";
 
         if (session.mode === "assessment") {
           if (!mastered && this.attempt < this.attemptsAllowed) {
             ui.primaryMode = "retry_attempt";
             ui.nextAttempt = this.attempt + 1;
             primaryLabel = `Retry Attempt ${ui.nextAttempt}/${this.attemptsAllowed} (Enter/R)`;
-            tipText = "You can retry to reach mastery.";
+            tipText = "You can retry to reach mastery (completion already recorded).";
           } else {
             ui.primaryMode = "done";
             ui.nextAttempt = null;
@@ -779,10 +843,11 @@
         ui.primary.txt.setText(primaryLabel);
 
         ui.body.setText(
+          `Level: ${result.levelId}\n` +
           `Completed: ${result.completed}\n` +
           `Reason: ${result.reason}\n\n` +
           `Accuracy: ${result.accuracy}% (Mastery: ${this.masteryAccuracy}%)\n` +
-          `Questions: ${result.correct}/${result.answered}\n` +
+          `Questions: ${result.correct}/${result.answered} (Required: ${this.REQUIRED_QUESTIONS})\n` +
           `Score: ${result.score}\n` +
           `Time: ${durationSec}s\n` +
           (this.infiniteLives ? "" : `Lives Remaining: ${result.livesRemaining}\n`) +
@@ -839,17 +904,16 @@
       }
 
       onResultsMenu() {
+        // Go back to level select by reloading the page
         window.location.reload();
       }
 
       // ---------- Update loop ----------
       update() {
-        // Hide flag locked message after timeout
         if (this.flagMsg.visible && Date.now() > this.flagMessageUntil) {
           this.flagMsg.setVisible(false);
         }
 
-        // Results screen input
         if (this.isResultsOpen) {
           const k = this._resultsKeys;
           if (k) {
@@ -864,7 +928,6 @@
           return;
         }
 
-        // Question modal input
         if (this.isQuestionOpen) {
           const k = this._questionKeys;
           const ui = this.questionUI;
@@ -886,7 +949,7 @@
           return;
         }
 
-        // Normal gameplay
+        // Movement
         const left = this.cursors.left.isDown || this.keyA.isDown;
         const right = this.cursors.right.isDown || this.keyD.isDown;
 
@@ -932,7 +995,6 @@
         const playerFalling = player.body.velocity.y > 50;
         const playerAbove = player.y + 10 < enemy.y;
 
-        // stomp
         if (playerFalling && playerAbove) {
           enemy.destroy();
           player.body.setVelocityY(-260);
@@ -940,7 +1002,6 @@
           return;
         }
 
-        // damage
         if (!this.infiniteLives) this.lives -= 1;
 
         player.body.setVelocityX(player.x < enemy.x ? -220 : 220);
@@ -960,7 +1021,7 @@
         qb.used = true;
         qb.setAlpha(0.55);
 
-        const q = questionBank.questions[this.qIndex % questionBank.questions.length];
+        const q = level.questions[this.qIndex % level.questions.length];
         this.qIndex++;
 
         this.openQuestion(q, qb);
@@ -969,11 +1030,10 @@
       onFlagTouch() {
         if (this.isQuestionOpen || this.isResultsOpen) return;
 
-        this.recomputeFlagUnlock();
+        this.recomputeGateState();
 
         if (!this.flagUnlocked) {
           this.showFlagLockedMessage();
-          // Small bump so they don't sit inside the flag overlap
           this.player.body.setVelocityX(-80);
           return;
         }
@@ -981,17 +1041,16 @@
         this.endAttempt(true, "completed");
       }
 
-      // ---------- End attempt (results screen) ----------
+      // ---------- End attempt ----------
       endAttempt(completed, reason) {
         if (this.isResultsOpen) return;
-
         if (this.isQuestionOpen) this.closeQuestion();
 
         const ms = Date.now() - this.levelStartMs;
         const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
 
         const result = {
-          levelId: questionBank.levelId || "world1-1",
+          levelId: level.levelId || session.levelId,
           completed,
           reason,
           score: this.score,
@@ -1002,7 +1061,8 @@
           attempt: this.attempt,
           durationMs: ms,
           atISO: new Date().toISOString(),
-          masteryMet: accuracy >= this.masteryAccuracy
+          masteryMet: accuracy >= this.masteryAccuracy,
+          requiredQuestions: this.REQUIRED_QUESTIONS
         };
 
         try {
@@ -1018,30 +1078,15 @@
         const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
         const lifeText = this.infiniteLives ? "∞" : String(this.lives);
         const attemptText = (session.mode === "assessment") ? `   Attempt ${this.attempt}/${this.attemptsAllowed}` : "";
-
-        // Gate status
         const qProgress = `${Math.min(this.answered, this.REQUIRED_QUESTIONS)}/${this.REQUIRED_QUESTIONS}`;
-        const flagStatus = (this.flagUnlocked) ? "UNLOCKED" : "LOCKED";
+        const flagStatus = this.flagUnlocked ? "UNLOCKED" : "LOCKED";
+        const masteryStatus = (accuracy >= this.masteryAccuracy) ? "MET" : "NOT MET";
 
         this.hud.setText(
-          `Score ${this.score}   Lives ${lifeText}   Acc ${accuracy}%   Q ${this.correct}/${this.answered}${attemptText}\n` +
-          `Flag: ${flagStatus} (Questions ${qProgress}, Mastery ${this.masteryAccuracy}%)`
+          `Level ${level.levelId || session.levelId}   Score ${this.score}   Lives ${lifeText}   Acc ${accuracy}%   Q ${this.correct}/${this.answered}${attemptText}\n` +
+          `Finish Gate: ${flagStatus} (Questions ${qProgress})   Mastery: ${masteryStatus} (>= ${this.masteryAccuracy}%)`
         );
       }
     };
   }
-
-  function escapeHtml(s) {
-    return String(s ?? "").replace(/[&<>"']/g, c => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      "\"": "&quot;",
-      "'": "&#39;"
-    }[c]));
-  }
-
-  // Boot
-  // (ensures file ends correctly)
 })();
-
