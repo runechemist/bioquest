@@ -1,0 +1,55 @@
+{
+  "levelId": "world1-2",
+  "requiredQuestions": 4,
+  "masteryAccuracy": 70,
+  "questions": [
+    {
+      "prompt": "Which structure is found in plant cells but NOT in animal cells?",
+      "choices": ["Mitochondrion", "Cell wall", "Ribosome", "Cell membrane"],
+      "answerIndex": 1,
+      "explanation": "Plant cells have a rigid cell wall for support; animal cells do not."
+    },
+    {
+      "prompt": "What is the main function of the cell membrane?",
+      "choices": ["Make proteins", "Control what enters and leaves the cell", "Store DNA", "Break down toxins"],
+      "answerIndex": 1,
+      "explanation": "The membrane is selectively permeable, regulating movement of substances in and out."
+    },
+    {
+      "prompt": "Which organelle is most directly responsible for producing ATP for the cell?",
+      "choices": ["Golgi apparatus", "Mitochondrion", "Vacuole", "Nucleolus"],
+      "answerIndex": 1,
+      "explanation": "Mitochondria perform cellular respiration to generate ATP energy."
+    },
+    {
+      "prompt": "DNA is primarily located in which part of a eukaryotic cell?",
+      "choices": ["Nucleus", "Cytoplasm", "Cell wall", "Ribosome"],
+      "answerIndex": 0,
+      "explanation": "In eukaryotes, most DNA is stored in the nucleus."
+    },
+    {
+      "prompt": "Which statement best describes a prokaryotic cell?",
+      "choices": ["Has a nucleus", "Has membrane-bound organelles", "Lacks a nucleus", "Is always multicellular"],
+      "answerIndex": 2,
+      "explanation": "Prokaryotes do not have a nucleus or membrane-bound organelles."
+    },
+    {
+      "prompt": "Ribosomes are the site of which cell process?",
+      "choices": ["Protein synthesis", "Photosynthesis", "ATP storage", "DNA replication"],
+      "answerIndex": 0,
+      "explanation": "Ribosomes assemble amino acids into proteins."
+    },
+    {
+      "prompt": "Which organelle modifies, sorts, and packages proteins for transport?",
+      "choices": ["Golgi apparatus", "Mitochondrion", "Chloroplast", "Nucleus"],
+      "answerIndex": 0,
+      "explanation": "The Golgi prepares proteins (and lipids) for delivery to other parts of the cell or outside."
+    },
+    {
+      "prompt": "In the microscope, which unit is commonly used to measure cell size?",
+      "choices": ["Millimeter (mm)", "Micrometer (µm)", "Kilometer (km)", "Nanogram (ng)"],
+      "answerIndex": 1,
+      "explanation": "Cells are typically measured in micrometers (µm), which are much smaller than millimeters."
+    }
+  ]
+}
