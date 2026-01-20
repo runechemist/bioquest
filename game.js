@@ -1,17 +1,10 @@
 /* BioQuest MVP - game.js (FULL FILE)
-   Polished visuals + in-game question panel + EXPLANATIONS + show correct answer
-   + CONFIRM BUTTON after answering
-   + IN-GAME RESULTS SCREEN (replaces end-of-level alert())
+   Adds: MASTERY GATE for flagpole (must answer N questions AND meet mastery accuracy)
+   - HUD shows flag status: LOCKED/UNLOCKED and progress
+   - If player touches flag while locked, shows a brief on-screen message (no end)
+   - Default requirement: 3 questions answered (change REQUIRED_QUESTIONS below)
 
-   Question JSON supports (recommended):
-   {
-     "prompt": "...",
-     "choices": ["A","B","C","D"],
-     "answerIndex": 1,
-     "explanation": "One sentence explanation."
-   }
-
-   Files expected:
+   Requires:
    - /shared/storage.js
    - /data/questions_world1-1.json
 */
@@ -126,6 +119,9 @@
       constructor() {
         super("BioQuestScene");
 
+        // ---- Mastery gate settings ----
+        this.REQUIRED_QUESTIONS = 3; // change this to 5, etc. if desired
+
         this.score = 0;
         this.correct = 0;
         this.answered = 0;
@@ -139,6 +135,9 @@
 
         this.isQuestionOpen = false;
         this.isResultsOpen = false;
+
+        this.flagUnlocked = false;
+        this.flagMessageUntil = 0;
       }
 
       init(data) {
@@ -265,6 +264,14 @@
           color: "#fff"
         }).setScrollFactor(0);
 
+        // Brief message when flag is locked
+        this.flagMsg = this.add.text(480, 70, "", {
+          fontFamily: "monospace",
+          fontSize: "14px",
+          color: "#cfe7ff",
+          align: "center"
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(50).setVisible(false);
+
         this.platforms = this.physics.add.staticGroup();
         this.coins = this.physics.add.staticGroup();
         this.qblocks = this.physics.add.staticGroup();
@@ -307,7 +314,7 @@
         this.spawnEnemy(980, H - 45);
         this.spawnEnemy(1500, H - 45);
 
-        // Q-blocks
+        // Q-blocks (you can add more)
         this.spawnQBlock(320, 300, "qb1");
         this.spawnQBlock(1100, 300, "qb2");
         this.spawnQBlock(2050, 300, "qb3");
@@ -326,7 +333,7 @@
         // Overlaps
         this.physics.add.overlap(this.player, this.coins, this.onCoin, null, this);
         this.physics.add.overlap(this.player, this.enemies, this.onEnemy, null, this);
-        this.physics.add.overlap(this.player, this.flag, this.onWin, null, this);
+        this.physics.add.overlap(this.player, this.flag, this.onFlagTouch, null, this);
 
         // Camera
         this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
@@ -342,6 +349,7 @@
         this.buildResultsUI();
 
         this.levelStartMs = Date.now();
+        this.recomputeFlagUnlock();
         this.updateHUD();
       }
 
@@ -390,13 +398,39 @@
         this.qblocks.add(qb);
       }
 
+      // ---------- Mastery gate logic ----------
+      recomputeFlagUnlock() {
+        const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
+        const questionsMet = this.answered >= this.REQUIRED_QUESTIONS;
+        const masteryMet = accuracy >= this.masteryAccuracy;
+
+        this.flagUnlocked = questionsMet && masteryMet;
+      }
+
+      showFlagLockedMessage() {
+        const needQ = Math.max(0, this.REQUIRED_QUESTIONS - this.answered);
+        const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
+        const msg =
+          `Flag is locked.\n` +
+          `Need: ${needQ} more question(s) AND mastery (${this.masteryAccuracy}%).\n` +
+          `Current accuracy: ${accuracy}%`;
+
+        this.flagMsg.setText(msg);
+        this.flagMsg.setVisible(true);
+        this.flagMessageUntil = Date.now() + 1800;
+      }
+
       // ---------- Question UI ----------
       buildQuestionUI() {
         const W = 960;
         const H = 540;
 
-        const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.55)
+        const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0x0, 0.55)
           .setScrollFactor(0).setDepth(1000).setVisible(false);
+
+        // NOTE: Phaser rectangle uses (x,y,w,h,fillColor,fillAlpha) signature.
+        // Some builds accept (fillColor, fillAlpha). To stay safe:
+        overlay.setFillStyle(0x000000, 0.55);
 
         const panel = this.add.rectangle(W / 2, H / 2, 820, 480, 0x141821, 0.95)
           .setScrollFactor(0).setDepth(1001).setVisible(false);
@@ -561,6 +595,9 @@
         ui.answered = false;
 
         this.physics.world.resume();
+
+        // Recompute mastery gate after each question closes
+        this.recomputeFlagUnlock();
       }
 
       submitChoice(choiceIndex) {
@@ -807,6 +844,11 @@
 
       // ---------- Update loop ----------
       update() {
+        // Hide flag locked message after timeout
+        if (this.flagMsg.visible && Date.now() > this.flagMessageUntil) {
+          this.flagMsg.setVisible(false);
+        }
+
         // Results screen input
         if (this.isResultsOpen) {
           const k = this._resultsKeys;
@@ -924,8 +966,18 @@
         this.openQuestion(q, qb);
       }
 
-      onWin() {
+      onFlagTouch() {
         if (this.isQuestionOpen || this.isResultsOpen) return;
+
+        this.recomputeFlagUnlock();
+
+        if (!this.flagUnlocked) {
+          this.showFlagLockedMessage();
+          // Small bump so they don't sit inside the flag overlap
+          this.player.body.setVelocityX(-80);
+          return;
+        }
+
         this.endAttempt(true, "completed");
       }
 
@@ -966,7 +1018,15 @@
         const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
         const lifeText = this.infiniteLives ? "∞" : String(this.lives);
         const attemptText = (session.mode === "assessment") ? `   Attempt ${this.attempt}/${this.attemptsAllowed}` : "";
-        this.hud.setText(`Score ${this.score}   Lives ${lifeText}   Acc ${accuracy}%   Q ${this.correct}/${this.answered}${attemptText}`);
+
+        // Gate status
+        const qProgress = `${Math.min(this.answered, this.REQUIRED_QUESTIONS)}/${this.REQUIRED_QUESTIONS}`;
+        const flagStatus = (this.flagUnlocked) ? "UNLOCKED" : "LOCKED";
+
+        this.hud.setText(
+          `Score ${this.score}   Lives ${lifeText}   Acc ${accuracy}%   Q ${this.correct}/${this.answered}${attemptText}\n` +
+          `Flag: ${flagStatus} (Questions ${qProgress}, Mastery ${this.masteryAccuracy}%)`
+        );
       }
     };
   }
@@ -980,4 +1040,7 @@
       "'": "&#39;"
     }[c]));
   }
+
+  // Boot
+  // (ensures file ends correctly)
 })();
