@@ -3,122 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <title>BioQuest</title>
-
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <!-- Phaser -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 
-  <!-- Basic styling -->
   <style>
-    body {
-      margin: 0;
-      background: #0f1115;
-      color: #ffffff;
-      font-family: monospace;
-    }
-
-    #ui {
-      position: absolute;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      width: 960px;
-      max-width: 96%;
-    }
-
-    .panel {
-      background: #141821;
-      border: 2px solid #2a3242;
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 10px;
-    }
-
-    .row {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
-    }
-
-    label {
-      font-size: 12px;
-      color: #cfe7ff;
-    }
-
-    input, select, button {
-      background: #1e2431;
-      color: #ffffff;
-      border: 2px solid #2f3a50;
-      border-radius: 8px;
-      padding: 8px;
-      font-family: monospace;
-      font-size: 14px;
-    }
-
-    button {
-      cursor: pointer;
-    }
-
-    button:hover:not(.locked) {
-      background: #252c3d;
-    }
-
-    .badge {
-      background: #1e2431;
-      border: 1px solid #2f3a50;
-      border-radius: 6px;
-      padding: 4px 8px;
-      margin-right: 6px;
-      font-size: 12px;
-    }
-
-    .small {
-      font-size: 12px;
-      color: #b8c7e0;
-    }
-
-    .levels {
-      display: flex;
-      gap: 12px;
-      margin-top: 10px;
-      flex-wrap: wrap;
-    }
-
-    .level-btn {
-      width: 120px;
-      text-align: center;
-    }
-
-    .locked {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    #game {
-      margin-top: 200px;
-    }
+    body { margin:0; background:#0f1115; color:#fff; font-family:monospace; }
+    #ui { position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:10; width:960px; max-width:96%; }
+    .panel { background:#141821; border:2px solid #2a3242; border-radius:12px; padding:16px; margin-bottom:10px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:10px; align-items:flex-end; }
+    label { font-size:12px; color:#cfe7ff; display:block; margin-bottom:4px; }
+    input, select, button { background:#1e2431; color:#fff; border:2px solid #2f3a50; border-radius:8px; padding:8px; font-family:monospace; font-size:14px; }
+    button { cursor:pointer; }
+    button:hover:not(:disabled) { background:#252c3d; }
+    button:disabled { opacity:0.45; cursor:not-allowed; }
+    .badge { background:#1e2431; border:1px solid #2f3a50; border-radius:6px; padding:4px 8px; margin-right:6px; font-size:12px; }
+    .small { font-size:12px; color:#b8c7e0; }
+    .levels { display:flex; gap:10px; flex-wrap:wrap; }
+    .level-btn { width:120px; text-align:center; }
+    .level-btn.selected { border-color:#7aa7ff; box-shadow:0 0 0 2px rgba(122,167,255,0.25) inset; }
+    #game { margin-top:200px; }
   </style>
 </head>
 
 <body>
-
   <div id="ui"></div>
-
   <div id="game"></div>
 
-  <!-- Storage -->
+  <!-- Local storage lib -->
   <script src="./shared/storage.js"></script>
 
-  <!-- Level selection logic -->
   <script>
     const UI = document.getElementById("ui");
+    let selectedLevel = null;
 
     function getUnlockedLevels() {
       try {
-        return JSON.parse(localStorage.getItem("bioquest_unlocked_levels")) || ["world1-1"];
+        const v = JSON.parse(localStorage.getItem("bioquest_unlocked_levels"));
+        return Array.isArray(v) && v.length ? v : ["world1-1"];
       } catch {
         return ["world1-1"];
       }
@@ -129,27 +52,26 @@
       unlocked.add(levelId);
       localStorage.setItem("bioquest_unlocked_levels", JSON.stringify([...unlocked]));
     }
-
     window.unlockLevel = unlockLevel;
 
-    function renderStartUI() {
+    function renderUI() {
       const unlocked = getUnlockedLevels();
 
       UI.innerHTML = `
         <div class="panel">
           <div class="row">
             <div>
-              <label>Class Code</label><br />
-              <input id="classCode" placeholder="AB3K9Q" />
+              <label>Class Code</label>
+              <input id="classCode" placeholder="AB3K9Q" maxlength="12" />
             </div>
 
             <div>
-              <label>Student ID</label><br />
-              <input id="studentId" placeholder="4821" />
+              <label>Student ID</label>
+              <input id="studentId" placeholder="4821" maxlength="24" />
             </div>
 
             <div>
-              <label>Mode</label><br />
+              <label>Mode</label>
               <select id="mode">
                 <option value="assessment">Assessment</option>
                 <option value="practice">Practice</option>
@@ -157,90 +79,113 @@
             </div>
           </div>
 
-          <label>Select Level</label>
-          <div class="levels">
-            ${["world1-1", "world1-2", "world1-3"].map(lvl => {
-              const locked = !unlocked.includes(lvl);
-              return `
-                <button
-                  class="level-btn ${locked ? "locked" : ""}"
-                  data-level="${lvl}"
-                  ${locked ? "disabled" : ""}
-                >
-                  ${lvl.replace("world", "World ")}
-                </button>
-              `;
-            }).join("")}
+          <div>
+            <label>Select Level</label>
+            <div class="levels">
+              ${["world1-1","world1-2","world1-3"].map(lvl => {
+                const locked = !unlocked.includes(lvl);
+                return `
+                  <button class="level-btn" data-level="${lvl}" ${locked ? "disabled" : ""}>
+                    ${lvl.replace("world","World ")}
+                  </button>
+                `;
+              }).join("")}
+            </div>
+            <div class="small" style="margin-top:8px;">
+              Levels unlock after completion.
+            </div>
           </div>
 
-          <div class="small" style="margin-top:10px">
-            Levels unlock after completion.
+          <div class="row" style="margin-top:14px;">
+            <button id="startBtn" disabled>Start Level</button>
+            <span class="small" id="selectedLabel">Select a level to begin.</span>
+          </div>
+
+          <div class="small">
+            Controls: A/D or ◀▶ to move. ▲ to jump. 1–4 to answer.
           </div>
         </div>
       `;
 
-      document.querySelectorAll(".level-btn").forEach(btn => {
+      // Level selection
+      UI.querySelectorAll(".level-btn").forEach(btn => {
         btn.addEventListener("click", () => {
-          window.BIOQUEST_SELECTED_LEVEL = btn.dataset.level;
-          document.getElementById("startBtn")?.remove();
-          startGameFromUI();
+          selectedLevel = btn.dataset.level;
+
+          UI.querySelectorAll(".level-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+
+          const startBtn = document.getElementById("startBtn");
+          const label = document.getElementById("selectedLabel");
+          startBtn.disabled = false;
+          label.textContent = `Selected: ${selectedLevel.replace("world","World ")}`;
         });
+      });
+
+      // Start
+      document.getElementById("startBtn").addEventListener("click", () => {
+        startGameFromUI();
       });
     }
 
+    function loadGameJsOnce() {
+      if (window.__BIOQUEST_GAMEJS_LOADED__) return;
+      window.__BIOQUEST_GAMEJS_LOADED__ = true;
+
+      const s = document.createElement("script");
+      s.src = "./game.js";
+      document.body.appendChild(s);
+    }
+
     function startGameFromUI() {
-      const classCode = document.getElementById("classCode").value.trim().toUpperCase();
-      const studentId = document.getElementById("studentId").value.trim();
-      const mode = document.getElementById("mode").value;
+      const classEl = document.getElementById("classCode");
+      const studentEl = document.getElementById("studentId");
+      const modeEl = document.getElementById("mode");
+
+      // If these are null, the UI is not present (prevents your current error)
+      if (!classEl || !studentEl || !modeEl) {
+        alert("UI inputs not found. Refresh the page and try again.");
+        return;
+      }
+
+      const classCode = (classEl.value || "").trim().toUpperCase();
+      const studentId = (studentEl.value || "").trim();
+      const mode = modeEl.value;
 
       if (!classCode || !studentId) {
         alert("Enter Class Code and Student ID.");
         return;
       }
+      if (!selectedLevel) {
+        alert("Select a level.");
+        return;
+      }
 
+      // Create BOOT object for game.js
+      window.BIOQUEST_SESSION_BOOT = {
+        classCode,
+        studentId,
+        mode,
+        levelId: selectedLevel
+      };
+
+      // Show badges
       UI.innerHTML = `
         <div class="panel">
           <span class="badge">Class ${classCode}</span>
           <span class="badge">Student ${studentId}</span>
           <span class="badge">${mode}</span>
-          <span class="badge">${window.BIOQUEST_SELECTED_LEVEL || "world1-1"}</span>
+          <span class="badge">${selectedLevel}</span>
         </div>
       `;
 
-      window.BIOQUEST_SESSION_BOOT = {
-        classCode,
-        studentId,
-        mode,
-        levelId: window.BIOQUEST_SELECTED_LEVEL || "world1-1"
-      };
+      // Now load game.js AFTER boot exists
+      loadGameJsOnce();
     }
 
-    renderStartUI();
+    renderUI();
   </script>
 
-  <!-- Game -->
-  <script>
-  function loadGameJsOnce() {
-    if (window.__GAME_LOADED__) return;
-    window.__GAME_LOADED__ = true;
-
-    const s = document.createElement("script");
-    s.src = "./game.js";
-    document.body.appendChild(s);
-  }
-
-  // Modify the click handler to set boot AND then load game.js
-  document.addEventListener("click", (e) => {
-    const btn = e.target.closest(".level-btn");
-    if (!btn || btn.disabled) return;
-
-    window.BIOQUEST_SELECTED_LEVEL = btn.dataset.level;
-    startGameFromUI();     // sets BIOQUEST_SESSION_BOOT
-    loadGameJsOnce();      // loads game.js after boot exists
-  });
-</script>
-
-
+  <!-- IMPORTANT: we do NOT include game.js here anymore -->
 </body>
 </html>
-
