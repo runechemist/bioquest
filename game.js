@@ -1,25 +1,22 @@
 /* BioQuest MVP - game.js (FULL FILE)
-   Polished visuals + in-game question panel + EXPLANATIONS + show correct answer.
+   Polished visuals + in-game question panel + EXPLANATIONS + show correct answer
+   + CONFIRM BUTTON before closing question modal.
 
-   New in this version:
-   - Questions support optional: q.explanation (string)
-   - After answering:
-     - Correct choice is highlighted (green)
-     - If wrong, chosen is red and correct is green
-     - Explanation is shown in the modal (1–2 sentences recommended)
-   - No prompt(), no alert() for questions
-   - Physics pauses during questions
+   Fixes requested:
+   - Explanation now shows reliably (falls back to "Correct answer: ..." if missing)
+   - Adds a "Continue" button + Space/Enter to close after reviewing feedback
+   - Does NOT auto-close after a timer anymore
 
-   Still included:
-   - Procedural textures (no external assets)
-   - Player looks like a cell
-   - Rounded platform tiles
-   - Coins + Q-blocks textured
-   - Q-blocks SOLID; question triggers only on bottom-hit
-   - Enemies patrol within bounds and bounce back
+   Question JSON supports (recommended):
+   {
+     "prompt": "...",
+     "choices": ["A","B","C","D"],
+     "answerIndex": 1,
+     "explanation": "One sentence explanation."
+   }
 
    Files expected:
-   - /shared/storage.js  (provides window.BQ)
+   - /shared/storage.js
    - /data/questions_world1-1.json
 */
 
@@ -133,7 +130,6 @@
       constructor() {
         super("BioQuestScene");
 
-        // Run stats
         this.score = 0;
         this.correct = 0;
         this.answered = 0;
@@ -142,24 +138,19 @@
         this.levelStartMs = 0;
         this.qIndex = 0;
 
-        // Enemy tuning
         this.enemySpeed = 80;
         this.enemyPatrolRange = 260;
 
-        // Modal state
         this.isQuestionOpen = false;
       }
 
-      // ----- Texture generation (no external assets) -----
       createProceduralTextures() {
         if (this.textures.exists("cellPlayer")) return;
 
         // Player cell texture (48x48)
         {
           const g = this.make.graphics({ x: 0, y: 0, add: false });
-          const size = 48;
-          const cx = size / 2;
-          const cy = size / 2;
+          const size = 48, cx = size / 2, cy = size / 2;
 
           g.fillStyle(0x5fd3ff, 1);
           g.fillCircle(cx, cy, 20);
@@ -266,95 +257,79 @@
         this.cameras.main.setBackgroundColor("#0f1115");
         this.physics.world.setBounds(0, 0, levelWidth, H);
 
-        // HUD
         this.hud = this.add.text(12, 10, "", {
           fontFamily: "monospace",
           fontSize: "16px",
           color: "#fff"
         }).setScrollFactor(0);
 
-        // Groups
         this.platforms = this.physics.add.staticGroup();
         this.coins = this.physics.add.staticGroup();
         this.qblocks = this.physics.add.staticGroup();
         this.flag = this.physics.add.staticGroup();
 
-        // Enemies
         this.enemies = this.physics.add.group({
           classType: Phaser.Physics.Arcade.Sprite,
           allowGravity: true,
           immovable: false
         });
 
-        // Ground tiles
         for (let x = 0; x < levelWidth; x += 64) {
           const ground = this.add.image(x + 32, H - 18, "platform64");
           this.physics.add.existing(ground, true);
           this.platforms.add(ground);
         }
 
-        // Floating platforms
         this.addPlatform(380, 380, 180);
         this.addPlatform(780, 320, 220);
         this.addPlatform(1260, 360, 220);
         this.addPlatform(1700, 320, 260);
         this.addPlatform(2200, 360, 220);
 
-        // Player
         this.player = this.physics.add.image(80, H - 90, "cellPlayer");
         this.player.setCollideWorldBounds(true);
         this.player.body.setGravityY(800);
         this.player.body.setSize(28, 34, true);
 
-        // Coins
         this.spawnCoin(220, H - 90);
         this.spawnCoin(420, 340);
         this.spawnCoin(820, 280);
         this.spawnCoin(1760, 280);
 
-        // Enemies (spawn slightly lower so they settle to ground quickly)
         this.spawnEnemy(520, H - 45);
         this.spawnEnemy(980, H - 45);
         this.spawnEnemy(1500, H - 45);
 
-        // Q-blocks
         this.spawnQBlock(320, 300, "qb1");
         this.spawnQBlock(1100, 300, "qb2");
         this.spawnQBlock(2050, 300, "qb3");
 
-        // Flag
         const flagImg = this.add.image(levelWidth - 150, H - 120, "flag18x200");
         this.physics.add.existing(flagImg, true);
         this.flag.add(flagImg);
 
-        // Colliders
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.enemies, this.platforms);
         this.physics.add.collider(this.player, this.qblocks, this.onQBlockCollide, null, this);
         this.physics.add.collider(this.enemies, this.qblocks);
 
-        // Overlaps
         this.physics.add.overlap(this.player, this.coins, this.onCoin, null, this);
         this.physics.add.overlap(this.player, this.enemies, this.onEnemy, null, this);
         this.physics.add.overlap(this.player, this.flag, this.onWin, null, this);
 
-        // Camera follow
         this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
         this.cameras.main.setBounds(0, 0, levelWidth, H);
 
-        // Controls
         this.cursors = this.input.keyboard.createCursorKeys();
         this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
         this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
 
-        // Modal UI
         this.buildQuestionUI();
 
         this.levelStartMs = Date.now();
         this.updateHUD();
       }
 
-      // ----- Level helpers -----
       addPlatform(x, y, widthPx) {
         const segments = Math.max(1, Math.round(widthPx / 64));
         const totalW = segments * 64;
@@ -374,8 +349,8 @@
 
       spawnEnemy(x, y) {
         const enemy = this.enemies.create(x, y, "enemy30");
-
         enemy.setCollideWorldBounds(true);
+
         enemy.body.setAllowGravity(true);
         enemy.body.setImmovable(false);
         enemy.body.setGravityY(900);
@@ -400,74 +375,74 @@
         this.qblocks.add(qb);
       }
 
-      // ----- Question Modal (with explanation + show correct) -----
+      // ----- Question Modal with explanation + Continue button -----
       buildQuestionUI() {
         const W = 960;
         const H = 540;
 
         const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.55)
-          .setScrollFactor(0)
-          .setDepth(1000)
-          .setVisible(false);
+          .setScrollFactor(0).setDepth(1000).setVisible(false);
 
-        const panel = this.add.rectangle(W / 2, H / 2, 820, 460, 0x141821, 0.95)
-          .setScrollFactor(0)
-          .setDepth(1001)
-          .setVisible(false);
+        const panel = this.add.rectangle(W / 2, H / 2, 820, 480, 0x141821, 0.95)
+          .setScrollFactor(0).setDepth(1001).setVisible(false);
         panel.setStrokeStyle(2, 0x2a3242, 1);
 
-        const title = this.add.text(W / 2, H / 2 - 210, "Question Block", {
+        const title = this.add.text(W / 2, H / 2 - 220, "Question Block", {
           fontFamily: "monospace",
           fontSize: "18px",
           color: "#cfe7ff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
 
-        const promptText = this.add.text(W / 2, H / 2 - 180, "", {
+        const promptText = this.add.text(W / 2, H / 2 - 195, "", {
           fontFamily: "monospace",
           fontSize: "17px",
           color: "#ffffff",
           wordWrap: { width: 760, useAdvancedWrap: true }
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1002).setVisible(false);
-
-        // Reserve prompt area height so choices never collide
         promptText.setFixedSize(760, 90);
 
-        const explanationText = this.add.text(W / 2, H / 2 - 80, "", {
+        const explanationText = this.add.text(W / 2, H / 2 - 100, "", {
           fontFamily: "monospace",
           fontSize: "15px",
           color: "#cfe7ff",
           wordWrap: { width: 760, useAdvancedWrap: true }
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1002).setVisible(false);
+        explanationText.setFixedSize(760, 65);
 
-        // Reserve explanation area (hidden until after answer)
-        explanationText.setFixedSize(760, 55);
-
-        const feedbackText = this.add.text(W / 2, H / 2 + 255, "", {
+        const feedbackText = this.add.text(W / 2, H / 2 + 210, "", {
           fontFamily: "monospace",
           fontSize: "16px",
           color: "#ffffff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
 
+        // Continue button
+        const btnW = 220, btnH = 48;
+        const continueBg = this.add.rectangle(W / 2, H / 2 + 255, btnW, btnH, 0x1e2431, 1)
+          .setScrollFactor(0).setDepth(1002).setVisible(false);
+        continueBg.setStrokeStyle(2, 0x2f3a50, 1);
+        continueBg.setInteractive({ useHandCursor: true });
+
+        const continueLabel = this.add.text(W / 2, H / 2 + 255, "Continue (Space/Enter)", {
+          fontFamily: "monospace",
+          fontSize: "14px",
+          color: "#ffffff"
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(1003).setVisible(false);
+
         const makeChoiceButton = (i, y) => {
-          const btnW = 760;
-          const btnH = 64;
+          const bw = 760, bh = 64;
 
-          const bg = this.add.rectangle(W / 2, y, btnW, btnH, 0x1e2431, 1)
-            .setScrollFactor(0)
-            .setDepth(1002)
-            .setVisible(false);
-
+          const bg = this.add.rectangle(W / 2, y, bw, bh, 0x1e2431, 1)
+            .setScrollFactor(0).setDepth(1002).setVisible(false);
           bg.setStrokeStyle(2, 0x2f3a50, 1);
           bg.setInteractive({ useHandCursor: true });
 
-          const label = this.add.text(W / 2 - btnW / 2 + 16, y, "", {
+          const label = this.add.text(W / 2 - bw / 2 + 16, y, "", {
             fontFamily: "monospace",
             fontSize: "15px",
             color: "#ffffff",
-            wordWrap: { width: btnW - 32, useAdvancedWrap: true }
+            wordWrap: { width: bw - 32, useAdvancedWrap: true }
           }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(1003).setVisible(false);
-
-          label.setFixedSize(btnW - 32, btnH - 10);
+          label.setFixedSize(bw - 32, bh - 10);
 
           bg.on("pointerover", () => { if (this.isQuestionOpen) bg.setFillStyle(0x252c3d, 1); });
           bg.on("pointerout", () => { if (this.isQuestionOpen) bg.setFillStyle(0x1e2431, 1); });
@@ -476,21 +451,12 @@
           return { bg, label };
         };
 
-        // Layout: prompt (fixed), explanation (fixed), then choices
-        const c1 = makeChoiceButton(0, H / 2 + 15);
-        const c2 = makeChoiceButton(1, H / 2 + 90);
-        const c3 = makeChoiceButton(2, H / 2 + 165);
-        const c4 = makeChoiceButton(3, H / 2 + 240);
+        const c1 = makeChoiceButton(0, H / 2 - 5);
+        const c2 = makeChoiceButton(1, H / 2 + 70);
+        const c3 = makeChoiceButton(2, H / 2 + 145);
+        const c4 = makeChoiceButton(3, H / 2 + 220);
 
-        this.questionUI = {
-          overlay, panel, title, promptText, explanationText, feedbackText,
-          choices: [c1, c2, c3, c4],
-          current: null,
-          qbRef: null,
-          locked: false
-        };
-
-        // Keyboard shortcuts 1–4 (top row and numpad)
+        // Keyboard shortcuts
         this._questionKeys = this.input.keyboard.addKeys({
           one: Phaser.Input.Keyboard.KeyCodes.ONE,
           two: Phaser.Input.Keyboard.KeyCodes.TWO,
@@ -499,25 +465,44 @@
           n1: Phaser.Input.Keyboard.KeyCodes.NUMPAD_ONE,
           n2: Phaser.Input.Keyboard.KeyCodes.NUMPAD_TWO,
           n3: Phaser.Input.Keyboard.KeyCodes.NUMPAD_THREE,
-          n4: Phaser.Input.Keyboard.KeyCodes.NUMPAD_FOUR
+          n4: Phaser.Input.Keyboard.KeyCodes.NUMPAD_FOUR,
+          enter: Phaser.Input.Keyboard.KeyCodes.ENTER,
+          space: Phaser.Input.Keyboard.KeyCodes.SPACE
         });
+
+        continueBg.on("pointerover", () => { if (this.isQuestionOpen) continueBg.setFillStyle(0x252c3d, 1); });
+        continueBg.on("pointerout", () => { if (this.isQuestionOpen) continueBg.setFillStyle(0x1e2431, 1); });
+        continueBg.on("pointerdown", () => { if (this.isQuestionOpen) this.confirmCloseQuestion(); });
+
+        this.questionUI = {
+          overlay, panel, title, promptText, explanationText, feedbackText,
+          choices: [c1, c2, c3, c4],
+          continueBg, continueLabel,
+          current: null,
+          qbRef: null,
+          locked: false,
+          answered: false
+        };
       }
 
       openQuestion(q, qbRef) {
         if (this.isQuestionOpen) return;
         this.isQuestionOpen = true;
 
-        // Pause physics while answering
         this.physics.world.pause();
 
         const ui = this.questionUI;
         ui.current = q;
         ui.qbRef = qbRef;
         ui.locked = false;
+        ui.answered = false;
 
         ui.feedbackText.setText("");
         ui.explanationText.setText("");
         ui.explanationText.setVisible(false);
+
+        ui.continueBg.setVisible(false);
+        ui.continueLabel.setVisible(false);
 
         ui.promptText.setText(q.prompt);
 
@@ -535,6 +520,13 @@
         ui.choices.forEach(c => { c.bg.setVisible(true); c.label.setVisible(true); });
       }
 
+      confirmCloseQuestion() {
+        const ui = this.questionUI;
+        if (!this.isQuestionOpen) return;
+        if (!ui.answered) return; // must answer first
+        this.closeQuestion();
+      }
+
       closeQuestion() {
         if (!this.isQuestionOpen) return;
         this.isQuestionOpen = false;
@@ -548,9 +540,13 @@
         ui.feedbackText.setVisible(false);
         ui.choices.forEach(c => { c.bg.setVisible(false); c.label.setVisible(false); });
 
+        ui.continueBg.setVisible(false);
+        ui.continueLabel.setVisible(false);
+
         ui.current = null;
         ui.qbRef = null;
         ui.locked = false;
+        ui.answered = false;
 
         this.physics.world.resume();
       }
@@ -558,12 +554,14 @@
       submitChoice(choiceIndex) {
         const ui = this.questionUI;
         if (!this.isQuestionOpen || ui.locked) return;
+
         ui.locked = true;
+        ui.answered = true;
 
         const q = ui.current;
         if (!q) {
           ui.locked = false;
-          this.closeQuestion();
+          ui.answered = false;
           return;
         }
 
@@ -571,33 +569,38 @@
         const isCorrect = (choiceIndex === q.answerIndex);
         if (isCorrect) this.correct += 1;
 
-        // Always show the correct answer (green)
+        // Highlight correct in green
         const correctBtn = ui.choices[q.answerIndex];
         correctBtn.bg.setFillStyle(0x16351e, 1);
         correctBtn.bg.setStrokeStyle(2, 0x34c76a, 1);
 
-        // If wrong, show chosen in red
+        // If wrong, highlight chosen in red
         if (!isCorrect) {
           const chosen = ui.choices[choiceIndex];
           chosen.bg.setFillStyle(0x3a1414, 1);
           chosen.bg.setStrokeStyle(2, 0xff6b6b, 1);
         }
 
-        // Explanation (optional)
-        const explanation = (typeof q.explanation === "string") ? q.explanation.trim() : "";
-        if (explanation) {
-          ui.explanationText.setText("Explanation: " + explanation);
+        // Explanation (reliable)
+        const expl = (typeof q.explanation === "string") ? q.explanation.trim() : "";
+        const correctText = (q.choices && q.choices[q.answerIndex] != null)
+          ? String(q.choices[q.answerIndex])
+          : "";
+
+        if (expl) {
+          ui.explanationText.setText("Explanation: " + expl);
+          ui.explanationText.setVisible(true);
+        } else if (correctText) {
+          ui.explanationText.setText("Correct answer: " + correctText);
           ui.explanationText.setVisible(true);
         } else {
           ui.explanationText.setText("");
           ui.explanationText.setVisible(false);
         }
 
-        // Feedback text + apply effects
         if (isCorrect) {
           ui.feedbackText.setText("Correct! +50 points");
           this.score += 50;
-
           const qb = ui.qbRef;
           if (qb) this.spawnCoin(qb.x, qb.y - 30);
         } else {
@@ -610,21 +613,33 @@
           }
         }
 
-        // Close after delay
-        this.time.delayedCall(950, () => this.closeQuestion());
+        // Show Continue button for confirmation
+        ui.continueBg.setVisible(true);
+        ui.continueLabel.setVisible(true);
+
+        // Allow additional key input now (Enter/Space)
+        ui.locked = false;
       }
 
-      // ----- Gameplay loop -----
       update() {
-        // Modal active: accept 1–4 keys, skip physics updates
+        // Modal open: accept answer keys; after answering accept Enter/Space to continue
         if (this.isQuestionOpen) {
           const k = this._questionKeys;
-          if (k) {
-            if (Phaser.Input.Keyboard.JustDown(k.one) || Phaser.Input.Keyboard.JustDown(k.n1)) this.submitChoice(0);
-            if (Phaser.Input.Keyboard.JustDown(k.two) || Phaser.Input.Keyboard.JustDown(k.n2)) this.submitChoice(1);
-            if (Phaser.Input.Keyboard.JustDown(k.three) || Phaser.Input.Keyboard.JustDown(k.n3)) this.submitChoice(2);
-            if (Phaser.Input.Keyboard.JustDown(k.four) || Phaser.Input.Keyboard.JustDown(k.n4)) this.submitChoice(3);
+          const ui = this.questionUI;
+
+          if (k && ui) {
+            if (!ui.answered) {
+              if (Phaser.Input.Keyboard.JustDown(k.one) || Phaser.Input.Keyboard.JustDown(k.n1)) this.submitChoice(0);
+              if (Phaser.Input.Keyboard.JustDown(k.two) || Phaser.Input.Keyboard.JustDown(k.n2)) this.submitChoice(1);
+              if (Phaser.Input.Keyboard.JustDown(k.three) || Phaser.Input.Keyboard.JustDown(k.n3)) this.submitChoice(2);
+              if (Phaser.Input.Keyboard.JustDown(k.four) || Phaser.Input.Keyboard.JustDown(k.n4)) this.submitChoice(3);
+            } else {
+              if (Phaser.Input.Keyboard.JustDown(k.enter) || Phaser.Input.Keyboard.JustDown(k.space)) {
+                this.confirmCloseQuestion();
+              }
+            }
           }
+
           this.updateHUD();
           return;
         }
@@ -639,7 +654,6 @@
         const onGround = this.player.body.blocked.down;
         if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
 
-        // Enemy patrol
         this.enemies.children.iterate(e => {
           if (!e?.body) return;
 
@@ -664,7 +678,6 @@
         this.updateHUD();
       }
 
-      // ----- Interactions -----
       onCoin(player, coin) {
         coin.destroy();
         this.score += 10;
