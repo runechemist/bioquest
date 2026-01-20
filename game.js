@@ -1,17 +1,17 @@
-/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS - FIXED Q-BLOCK HITBOXES + ENEMY PATROL)
+/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS + IN-GAME QUESTION PANEL)
    Works on GitHub Pages.
 
-   Visual upgrades:
+   Key upgrade (highest impact):
+   - Replaces blocking prompt() with an in-game modal question panel (buttons + keys 1–4)
+   - Pauses gameplay while the panel is open, then resumes
+
+   Other features retained:
    - Procedural textures (no external assets)
    - Player looks like a cell
    - Rounded platform tiles
    - Coins + Q-blocks textured
-
-   Gameplay fixes:
-   - Q-blocks are SOLID (stand on / collide sides); questions trigger only on bottom-hit
-   - Enemies spawn slightly lower (so they settle onto ground quickly)
-   - Enemies cannot "leave the game": they patrol within a bounded range and reverse direction
-     (also reverse on walls and world bounds)
+   - Q-blocks SOLID; question triggers only on bottom-hit
+   - Enemies patrol within bounds and bounce back
 
    Files expected:
    - /shared/storage.js  (provides window.BQ)
@@ -48,7 +48,7 @@
           <button id="startBtn">Start World 1-1</button>
         </div>
         <div class="small">
-          Controls: A/D or ◀▶ to move. ▲ to jump. Stomp enemies from above.
+          Controls: A/D or ◀▶ to move. ▲ to jump. Stomp enemies from above. Answer with buttons or 1–4 keys.
         </div>
       </div>
     `;
@@ -135,9 +135,11 @@
         this.levelStartMs = 0;
         this.qIndex = 0;
 
-        // Enemy tuning
         this.enemySpeed = 80;
-        this.enemyPatrolRange = 260; // pixels left/right from spawn
+        this.enemyPatrolRange = 260;
+
+        this.isQuestionOpen = false;
+        this._pausedVel = null;
       }
 
       // ----- Texture generation (no external assets) -----
@@ -269,22 +271,21 @@
         this.qblocks = this.physics.add.staticGroup();
         this.flag = this.physics.add.staticGroup();
 
-        // Enemies: create via group.create so Arcade movement is reliable
+        // Enemies: create via group.create for consistent Arcade behavior
         this.enemies = this.physics.add.group({
           classType: Phaser.Physics.Arcade.Sprite,
           allowGravity: true,
           immovable: false
         });
 
-        // Ground tiles (static bodies)
-        // Place so the TOP of the tile is around y ~ 510, leaving ~30px margin at bottom.
+        // Ground tiles
         for (let x = 0; x < levelWidth; x += 64) {
           const ground = this.add.image(x + 32, H - 18, "platform64");
           this.physics.add.existing(ground, true);
           this.platforms.add(ground);
         }
 
-        // Floating platforms (tile-built)
+        // Floating platforms
         this.addPlatform(380, 380, 180);
         this.addPlatform(780, 320, 220);
         this.addPlatform(1260, 360, 220);
@@ -303,8 +304,7 @@
         this.spawnCoin(820, 280);
         this.spawnCoin(1760, 280);
 
-        // Enemies (spawn a little LOWER so they “sit” on the ground faster)
-        // Ground top is ~ (H - 18) - 12 = H - 30. Enemy half-height ~ 15 => center ~ H - 45.
+        // Enemies (spawn slightly lower so they settle to ground quickly)
         this.spawnEnemy(520, H - 45);
         this.spawnEnemy(980, H - 45);
         this.spawnEnemy(1500, H - 45);
@@ -323,7 +323,7 @@
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.enemies, this.platforms);
 
-        // Q-blocks: SOLID + trigger question on bottom-hit
+        // Q-blocks solid + trigger on bottom-hit
         this.physics.add.collider(this.player, this.qblocks, this.onQBlockCollide, null, this);
         this.physics.add.collider(this.enemies, this.qblocks);
 
@@ -341,10 +341,14 @@
         this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
         this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
 
+        // In-game question UI (hidden until needed)
+        this.buildQuestionUI();
+
         this.levelStartMs = Date.now();
         this.updateHUD();
       }
 
+      // ----- Level building helpers -----
       addPlatform(x, y, widthPx) {
         const segments = Math.max(1, Math.round(widthPx / 64));
         const totalW = segments * 64;
@@ -362,7 +366,7 @@
         this.coins.add(coin);
       }
 
-      // Enemy: bounded patrol so it cannot wander/fall off camera forever.
+      // Enemies bounce back by patrolling within [patrolMinX, patrolMaxX]
       spawnEnemy(x, y) {
         const enemy = this.enemies.create(x, y, "enemy30");
 
@@ -372,19 +376,14 @@
         enemy.body.setGravityY(900);
         enemy.body.setDrag(0, 0);
         enemy.body.setSize(26, 26, true);
+        enemy.body.setMaxVelocity(240, 1200);
+        enemy.body.setBounce(0, 0);
 
-        // Patrol bounds (clip within world)
         const w = this.physics.world.bounds.width;
         enemy.patrolMinX = Math.max(20, x - this.enemyPatrolRange);
         enemy.patrolMaxX = Math.min(w - 20, x + this.enemyPatrolRange);
 
-        // Start moving left
         enemy.body.setVelocityX(-this.enemySpeed);
-        enemy.body.setMaxVelocity(240, 1200);
-
-        // Ensure it can't “bounce out” weirdly
-        enemy.body.setBounce(0, 0);
-
         return enemy;
       }
 
@@ -396,7 +395,213 @@
         this.qblocks.add(qb);
       }
 
+      // ----- In-game question modal -----
+      buildQuestionUI() {
+        const W = 960;
+        const H = 540;
+
+        const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.55)
+          .setScrollFactor(0)
+          .setDepth(1000)
+          .setVisible(false);
+
+        const panel = this.add.rectangle(W / 2, H / 2, 760, 380, 0x141821, 0.95)
+          .setScrollFactor(0)
+          .setDepth(1001)
+          .setVisible(false);
+
+        panel.setStrokeStyle(2, 0x2a3242, 1);
+
+        const title = this.add.text(W / 2, H / 2 - 160, "Question Block", {
+          fontFamily: "monospace",
+          fontSize: "18px",
+          color: "#cfe7ff"
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
+
+        const promptText = this.add.text(W / 2, H / 2 - 120, "", {
+          fontFamily: "monospace",
+          fontSize: "18px",
+          color: "#ffffff",
+          wordWrap: { width: 700 }
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1002).setVisible(false);
+
+        const feedbackText = this.add.text(W / 2, H / 2 + 150, "", {
+          fontFamily: "monospace",
+          fontSize: "16px",
+          color: "#ffffff"
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
+
+        const makeChoiceButton = (i, y) => {
+          const btnW = 700;
+          const btnH = 48;
+
+          const bg = this.add.rectangle(W / 2, y, btnW, btnH, 0x1e2431, 1)
+            .setScrollFactor(0)
+            .setDepth(1002)
+            .setVisible(false);
+
+          bg.setStrokeStyle(2, 0x2f3a50, 1);
+          bg.setInteractive({ useHandCursor: true });
+
+          const label = this.add.text(W / 2 - btnW / 2 + 16, y, "", {
+            fontFamily: "monospace",
+            fontSize: "16px",
+            color: "#ffffff",
+            wordWrap: { width: btnW - 32 }
+          }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(1003).setVisible(false);
+
+          bg.on("pointerover", () => { if (this.isQuestionOpen) bg.setFillStyle(0x252c3d, 1); });
+          bg.on("pointerout", () => { if (this.isQuestionOpen) bg.setFillStyle(0x1e2431, 1); });
+          bg.on("pointerdown", () => { if (this.isQuestionOpen) this.submitChoice(i); });
+
+          return { bg, label };
+        };
+
+        const c1 = makeChoiceButton(0, H / 2 + 10);
+        const c2 = makeChoiceButton(1, H / 2 + 70);
+        const c3 = makeChoiceButton(2, H / 2 + 130);
+        const c4 = makeChoiceButton(3, H / 2 + 190);
+
+        this.questionUI = {
+          overlay, panel, title, promptText, feedbackText,
+          choices: [c1, c2, c3, c4],
+          current: null,
+          qbRef: null,
+          locked: false
+        };
+
+        // Keyboard shortcuts 1–4 (top row and numpad)
+        const keys = this.input.keyboard.addKeys({
+          one: Phaser.Input.Keyboard.KeyCodes.ONE,
+          two: Phaser.Input.Keyboard.KeyCodes.TWO,
+          three: Phaser.Input.Keyboard.KeyCodes.THREE,
+          four: Phaser.Input.Keyboard.KeyCodes.FOUR,
+          n1: Phaser.Input.Keyboard.KeyCodes.NUMPAD_ONE,
+          n2: Phaser.Input.Keyboard.KeyCodes.NUMPAD_TWO,
+          n3: Phaser.Input.Keyboard.KeyCodes.NUMPAD_THREE,
+          n4: Phaser.Input.Keyboard.KeyCodes.NUMPAD_FOUR
+        });
+
+        this._questionKeys = keys;
+      }
+
+      openQuestion(q, qbRef) {
+        if (this.isQuestionOpen) return;
+        this.isQuestionOpen = true;
+
+        // Pause physics but keep UI input responsive
+        this.physics.world.pause();
+
+        // Store velocities to resume cleanly (optional; world.pause is enough, but safe)
+        this._pausedVel = {
+          playerVX: this.player?.body?.velocity?.x ?? 0,
+          playerVY: this.player?.body?.velocity?.y ?? 0
+        };
+
+        this.questionUI.current = q;
+        this.questionUI.qbRef = qbRef;
+        this.questionUI.locked = false;
+        this.questionUI.feedbackText.setText("");
+
+        this.questionUI.promptText.setText(q.prompt);
+
+        for (let i = 0; i < 4; i++) {
+          const text = `${i + 1}) ${q.choices[i] ?? ""}`;
+          this.questionUI.choices[i].label.setText(text);
+          this.questionUI.choices[i].bg.setFillStyle(0x1e2431, 1);
+          this.questionUI.choices[i].bg.setStrokeStyle(2, 0x2f3a50, 1);
+        }
+
+        // Show all
+        const ui = this.questionUI;
+        ui.overlay.setVisible(true);
+        ui.panel.setVisible(true);
+        ui.title.setVisible(true);
+        ui.promptText.setVisible(true);
+        ui.feedbackText.setVisible(true);
+        ui.choices.forEach(c => { c.bg.setVisible(true); c.label.setVisible(true); });
+      }
+
+      closeQuestion() {
+        if (!this.isQuestionOpen) return;
+        this.isQuestionOpen = false;
+
+        // Hide all
+        const ui = this.questionUI;
+        ui.overlay.setVisible(false);
+        ui.panel.setVisible(false);
+        ui.title.setVisible(false);
+        ui.promptText.setVisible(false);
+        ui.feedbackText.setVisible(false);
+        ui.choices.forEach(c => { c.bg.setVisible(false); c.label.setVisible(false); });
+
+        ui.current = null;
+        ui.qbRef = null;
+        ui.locked = false;
+
+        // Resume physics
+        this.physics.world.resume();
+      }
+
+      submitChoice(choiceIndex) {
+        const ui = this.questionUI;
+        if (!this.isQuestionOpen || ui.locked) return;
+        ui.locked = true;
+
+        const q = ui.current;
+        if (!q) {
+          ui.locked = false;
+          this.closeQuestion();
+          return;
+        }
+
+        this.answered += 1;
+
+        const isCorrect = (choiceIndex === q.answerIndex);
+        if (isCorrect) this.correct += 1;
+
+        // Visual feedback
+        const chosen = ui.choices[choiceIndex];
+        chosen.bg.setFillStyle(isCorrect ? 0x16351e : 0x3a1414, 1);
+        chosen.bg.setStrokeStyle(2, isCorrect ? 0x34c76a : 0xff6b6b, 1);
+
+        ui.feedbackText.setText(isCorrect ? "Correct! +50 points" : "Incorrect! Enemy spawned");
+
+        // Apply game effects
+        if (isCorrect) {
+          this.score += 50;
+          const qb = ui.qbRef;
+          if (qb) this.spawnCoin(qb.x, qb.y - 30);
+        } else {
+          const qb = ui.qbRef;
+          if (qb) {
+            const e = this.spawnEnemy(qb.x + 40, qb.y - 10);
+            e.patrolMinX = Math.max(e.patrolMinX, qb.x - 140);
+            e.patrolMaxX = Math.min(e.patrolMaxX, qb.x + 140);
+          }
+        }
+
+        // Close after a short delay so they see feedback
+        this.time.delayedCall(650, () => {
+          this.closeQuestion();
+        });
+      }
+
+      // ----- Gameplay loop -----
       update() {
+        // If question modal open: allow keyboard selection 1–4, but do not run gameplay
+        if (this.isQuestionOpen) {
+          const k = this._questionKeys;
+          if (k) {
+            if (Phaser.Input.Keyboard.JustDown(k.one) || Phaser.Input.Keyboard.JustDown(k.n1)) this.submitChoice(0);
+            if (Phaser.Input.Keyboard.JustDown(k.two) || Phaser.Input.Keyboard.JustDown(k.n2)) this.submitChoice(1);
+            if (Phaser.Input.Keyboard.JustDown(k.three) || Phaser.Input.Keyboard.JustDown(k.n3)) this.submitChoice(2);
+            if (Phaser.Input.Keyboard.JustDown(k.four) || Phaser.Input.Keyboard.JustDown(k.n4)) this.submitChoice(3);
+          }
+          this.updateHUD();
+          return;
+        }
+
         const left = this.cursors.left.isDown || this.keyA.isDown;
         const right = this.cursors.right.isDown || this.keyD.isDown;
 
@@ -407,25 +612,21 @@
         const onGround = this.player.body.blocked.down;
         if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
 
-        // Enemy patrol: reverse at patrol bounds, world-bounds, or walls.
+        // Enemy patrol: reverse at patrol edges or walls, prevent leaving patrol range
         this.enemies.children.iterate(e => {
           if (!e?.body) return;
 
-          // Anti-stall: if speed drops to ~0, restart in a direction
           if (Math.abs(e.body.velocity.x) < 5) {
             const dir = (e.x <= (e.patrolMinX + 5)) ? 1 : -1;
             e.body.setVelocityX(dir * this.enemySpeed);
           }
 
-          // Reverse at patrol edges
           if (e.x <= e.patrolMinX) e.body.setVelocityX(this.enemySpeed);
           if (e.x >= e.patrolMaxX) e.body.setVelocityX(-this.enemySpeed);
 
-          // Reverse on wall hits
           if (e.body.blocked.left || e.body.touching.left) e.body.setVelocityX(this.enemySpeed);
           if (e.body.blocked.right || e.body.touching.right) e.body.setVelocityX(-this.enemySpeed);
 
-          // Safety: if something goes wrong and it falls far below, warp back inside patrol
           if (e.y > this.physics.world.bounds.height + 100) {
             e.y = 200;
             e.x = (e.patrolMinX + e.patrolMaxX) / 2;
@@ -436,6 +637,7 @@
         this.updateHUD();
       }
 
+      // ----- Interactions -----
       onCoin(player, coin) {
         coin.destroy();
         this.score += 10;
@@ -462,7 +664,7 @@
         }
       }
 
-      // Q-blocks are solid; question triggers only when hit from below.
+      // Q-blocks are solid; question triggers only on bottom-hit.
       onQBlockCollide(player, qb) {
         if (qb.used) return;
 
@@ -475,29 +677,17 @@
         const q = questionBank.questions[this.qIndex % questionBank.questions.length];
         this.qIndex++;
 
-        const choiceText = q.choices.map((c, i) => `${i + 1}) ${c}`).join("\n");
-        const raw = prompt(`${q.prompt}\n\n${choiceText}\n\nType 1-4:`);
-
-        this.answered += 1;
-        const idx = parseInt(raw, 10) - 1;
-
-        if (idx === q.answerIndex) {
-          this.correct += 1;
-          this.score += 50;
-          this.spawnCoin(qb.x, qb.y - 30);
-        } else {
-          // Spawn the new enemy inside a small patrol window around the block
-          const e = this.spawnEnemy(qb.x + 40, qb.y - 10);
-          e.patrolMinX = Math.max(e.patrolMinX, qb.x - 140);
-          e.patrolMaxX = Math.min(e.patrolMaxX, qb.x + 140);
-        }
+        this.openQuestion(q, qb);
       }
 
       onWin() {
+        if (this.isQuestionOpen) return;
         this.endAttempt(true, "completed");
       }
 
       endAttempt(completed, reason) {
+        if (this.isQuestionOpen) this.closeQuestion();
+
         const ms = Date.now() - this.levelStartMs;
         const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
 
