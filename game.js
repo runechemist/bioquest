@@ -402,9 +402,9 @@
       recomputeFlagUnlock() {
         const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
         const questionsMet = this.answered >= this.REQUIRED_QUESTIONS;
-        const masteryMet = accuracy >= this.masteryAccuracy;
+         this.flagUnlocked = questionsMet; // finishable
+         this.masteryMetNow = (accuracy >= this.masteryAccuracy); // tracked for results only
 
-        this.flagUnlocked = questionsMet && masteryMet;
       }
 
       showFlagLockedMessage() {
@@ -1044,3 +1044,4 @@
   // Boot
   // (ensures file ends correctly)
 })();
+
