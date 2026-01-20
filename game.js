@@ -1,12 +1,16 @@
-/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS + IN-GAME QUESTION PANEL, FIXED LAYOUT)
-   Works on GitHub Pages.
+/* BioQuest MVP - game.js (FULL FILE)
+   Polished visuals + in-game question panel + EXPLANATIONS + show correct answer.
 
-   Key upgrade:
-   - In-game modal question panel (no prompt()) with buttons + keys 1–4
-   - Gameplay paused while modal is open
-   - FIXED: question/answer text now stays inside the modal (no spill)
+   New in this version:
+   - Questions support optional: q.explanation (string)
+   - After answering:
+     - Correct choice is highlighted (green)
+     - If wrong, chosen is red and correct is green
+     - Explanation is shown in the modal (1–2 sentences recommended)
+   - No prompt(), no alert() for questions
+   - Physics pauses during questions
 
-   Other features:
+   Still included:
    - Procedural textures (no external assets)
    - Player looks like a cell
    - Rounded platform tiles
@@ -128,6 +132,8 @@
     return class BioQuestScene extends Phaser.Scene {
       constructor() {
         super("BioQuestScene");
+
+        // Run stats
         this.score = 0;
         this.correct = 0;
         this.answered = 0;
@@ -136,9 +142,11 @@
         this.levelStartMs = 0;
         this.qIndex = 0;
 
+        // Enemy tuning
         this.enemySpeed = 80;
         this.enemyPatrolRange = 260;
 
+        // Modal state
         this.isQuestionOpen = false;
       }
 
@@ -271,7 +279,7 @@
         this.qblocks = this.physics.add.staticGroup();
         this.flag = this.physics.add.staticGroup();
 
-        // Enemies: create via group.create for consistent Arcade behavior
+        // Enemies
         this.enemies = this.physics.add.group({
           classType: Phaser.Physics.Arcade.Sprite,
           allowGravity: true,
@@ -322,8 +330,6 @@
         // Colliders
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.enemies, this.platforms);
-
-        // Q-blocks solid + trigger on bottom-hit
         this.physics.add.collider(this.player, this.qblocks, this.onQBlockCollide, null, this);
         this.physics.add.collider(this.enemies, this.qblocks);
 
@@ -341,14 +347,14 @@
         this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
         this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
 
-        // In-game question UI (hidden until needed)
+        // Modal UI
         this.buildQuestionUI();
 
         this.levelStartMs = Date.now();
         this.updateHUD();
       }
 
-      // ----- Level building helpers -----
+      // ----- Level helpers -----
       addPlatform(x, y, widthPx) {
         const segments = Math.max(1, Math.round(widthPx / 64));
         const totalW = segments * 64;
@@ -366,7 +372,6 @@
         this.coins.add(coin);
       }
 
-      // Enemies bounce back by patrolling within [patrolMinX, patrolMaxX]
       spawnEnemy(x, y) {
         const enemy = this.enemies.create(x, y, "enemy30");
 
@@ -389,13 +394,13 @@
 
       spawnQBlock(x, y, id) {
         const qb = this.add.image(x, y, "qblock28");
-        this.physics.add.existing(qb, true); // static solid
+        this.physics.add.existing(qb, true);
         qb.qbId = id;
         qb.used = false;
         this.qblocks.add(qb);
       }
 
-      // ----- In-game question modal (FIXED LAYOUT) -----
+      // ----- Question Modal (with explanation + show correct) -----
       buildQuestionUI() {
         const W = 960;
         const H = 540;
@@ -405,30 +410,39 @@
           .setDepth(1000)
           .setVisible(false);
 
-        const panel = this.add.rectangle(W / 2, H / 2, 820, 440, 0x141821, 0.95)
+        const panel = this.add.rectangle(W / 2, H / 2, 820, 460, 0x141821, 0.95)
           .setScrollFactor(0)
           .setDepth(1001)
           .setVisible(false);
-
         panel.setStrokeStyle(2, 0x2a3242, 1);
 
-        const title = this.add.text(W / 2, H / 2 - 195, "Question Block", {
+        const title = this.add.text(W / 2, H / 2 - 210, "Question Block", {
           fontFamily: "monospace",
           fontSize: "18px",
           color: "#cfe7ff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
 
-        const promptText = this.add.text(W / 2, H / 2 - 165, "", {
+        const promptText = this.add.text(W / 2, H / 2 - 180, "", {
           fontFamily: "monospace",
           fontSize: "17px",
           color: "#ffffff",
           wordWrap: { width: 760, useAdvancedWrap: true }
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1002).setVisible(false);
 
-        // Reserve a fixed prompt area so choices never collide with it
+        // Reserve prompt area height so choices never collide
         promptText.setFixedSize(760, 90);
 
-        const feedbackText = this.add.text(W / 2, H / 2 + 250, "", {
+        const explanationText = this.add.text(W / 2, H / 2 - 80, "", {
+          fontFamily: "monospace",
+          fontSize: "15px",
+          color: "#cfe7ff",
+          wordWrap: { width: 760, useAdvancedWrap: true }
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1002).setVisible(false);
+
+        // Reserve explanation area (hidden until after answer)
+        explanationText.setFixedSize(760, 55);
+
+        const feedbackText = this.add.text(W / 2, H / 2 + 255, "", {
           fontFamily: "monospace",
           fontSize: "16px",
           color: "#ffffff"
@@ -453,7 +467,6 @@
             wordWrap: { width: btnW - 32, useAdvancedWrap: true }
           }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(1003).setVisible(false);
 
-          // Keep label inside the button area
           label.setFixedSize(btnW - 32, btnH - 10);
 
           bg.on("pointerover", () => { if (this.isQuestionOpen) bg.setFillStyle(0x252c3d, 1); });
@@ -463,13 +476,14 @@
           return { bg, label };
         };
 
-        const c1 = makeChoiceButton(0, H / 2 - 10);
-        const c2 = makeChoiceButton(1, H / 2 + 65);
-        const c3 = makeChoiceButton(2, H / 2 + 140);
-        const c4 = makeChoiceButton(3, H / 2 + 215);
+        // Layout: prompt (fixed), explanation (fixed), then choices
+        const c1 = makeChoiceButton(0, H / 2 + 15);
+        const c2 = makeChoiceButton(1, H / 2 + 90);
+        const c3 = makeChoiceButton(2, H / 2 + 165);
+        const c4 = makeChoiceButton(3, H / 2 + 240);
 
         this.questionUI = {
-          overlay, panel, title, promptText, feedbackText,
+          overlay, panel, title, promptText, explanationText, feedbackText,
           choices: [c1, c2, c3, c4],
           current: null,
           qbRef: null,
@@ -477,7 +491,7 @@
         };
 
         // Keyboard shortcuts 1–4 (top row and numpad)
-        const keys = this.input.keyboard.addKeys({
+        this._questionKeys = this.input.keyboard.addKeys({
           one: Phaser.Input.Keyboard.KeyCodes.ONE,
           two: Phaser.Input.Keyboard.KeyCodes.TWO,
           three: Phaser.Input.Keyboard.KeyCodes.THREE,
@@ -487,8 +501,6 @@
           n3: Phaser.Input.Keyboard.KeyCodes.NUMPAD_THREE,
           n4: Phaser.Input.Keyboard.KeyCodes.NUMPAD_FOUR
         });
-
-        this._questionKeys = keys;
       }
 
       openQuestion(q, qbRef) {
@@ -498,21 +510,23 @@
         // Pause physics while answering
         this.physics.world.pause();
 
-        this.questionUI.current = q;
-        this.questionUI.qbRef = qbRef;
-        this.questionUI.locked = false;
-        this.questionUI.feedbackText.setText("");
+        const ui = this.questionUI;
+        ui.current = q;
+        ui.qbRef = qbRef;
+        ui.locked = false;
 
-        this.questionUI.promptText.setText(q.prompt);
+        ui.feedbackText.setText("");
+        ui.explanationText.setText("");
+        ui.explanationText.setVisible(false);
+
+        ui.promptText.setText(q.prompt);
 
         for (let i = 0; i < 4; i++) {
-          const text = `${i + 1}) ${q.choices[i] ?? ""}`;
-          this.questionUI.choices[i].label.setText(text);
-          this.questionUI.choices[i].bg.setFillStyle(0x1e2431, 1);
-          this.questionUI.choices[i].bg.setStrokeStyle(2, 0x2f3a50, 1);
+          ui.choices[i].label.setText(`${i + 1}) ${q.choices[i] ?? ""}`);
+          ui.choices[i].bg.setFillStyle(0x1e2431, 1);
+          ui.choices[i].bg.setStrokeStyle(2, 0x2f3a50, 1);
         }
 
-        const ui = this.questionUI;
         ui.overlay.setVisible(true);
         ui.panel.setVisible(true);
         ui.title.setVisible(true);
@@ -530,6 +544,7 @@
         ui.panel.setVisible(false);
         ui.title.setVisible(false);
         ui.promptText.setVisible(false);
+        ui.explanationText.setVisible(false);
         ui.feedbackText.setVisible(false);
         ui.choices.forEach(c => { c.bg.setVisible(false); c.label.setVisible(false); });
 
@@ -556,17 +571,37 @@
         const isCorrect = (choiceIndex === q.answerIndex);
         if (isCorrect) this.correct += 1;
 
-        const chosen = ui.choices[choiceIndex];
-        chosen.bg.setFillStyle(isCorrect ? 0x16351e : 0x3a1414, 1);
-        chosen.bg.setStrokeStyle(2, isCorrect ? 0x34c76a : 0xff6b6b, 1);
+        // Always show the correct answer (green)
+        const correctBtn = ui.choices[q.answerIndex];
+        correctBtn.bg.setFillStyle(0x16351e, 1);
+        correctBtn.bg.setStrokeStyle(2, 0x34c76a, 1);
 
-        ui.feedbackText.setText(isCorrect ? "Correct! +50 points" : "Incorrect! Enemy spawned");
+        // If wrong, show chosen in red
+        if (!isCorrect) {
+          const chosen = ui.choices[choiceIndex];
+          chosen.bg.setFillStyle(0x3a1414, 1);
+          chosen.bg.setStrokeStyle(2, 0xff6b6b, 1);
+        }
 
+        // Explanation (optional)
+        const explanation = (typeof q.explanation === "string") ? q.explanation.trim() : "";
+        if (explanation) {
+          ui.explanationText.setText("Explanation: " + explanation);
+          ui.explanationText.setVisible(true);
+        } else {
+          ui.explanationText.setText("");
+          ui.explanationText.setVisible(false);
+        }
+
+        // Feedback text + apply effects
         if (isCorrect) {
+          ui.feedbackText.setText("Correct! +50 points");
           this.score += 50;
+
           const qb = ui.qbRef;
           if (qb) this.spawnCoin(qb.x, qb.y - 30);
         } else {
+          ui.feedbackText.setText("Incorrect! Enemy spawned");
           const qb = ui.qbRef;
           if (qb) {
             const e = this.spawnEnemy(qb.x + 40, qb.y - 10);
@@ -575,11 +610,13 @@
           }
         }
 
-        this.time.delayedCall(650, () => this.closeQuestion());
+        // Close after delay
+        this.time.delayedCall(950, () => this.closeQuestion());
       }
 
       // ----- Gameplay loop -----
       update() {
+        // Modal active: accept 1–4 keys, skip physics updates
         if (this.isQuestionOpen) {
           const k = this._questionKeys;
           if (k) {
@@ -602,7 +639,7 @@
         const onGround = this.player.body.blocked.down;
         if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
 
-        // Enemy patrol: reverse at patrol edges or walls
+        // Enemy patrol
         this.enemies.children.iterate(e => {
           if (!e?.body) return;
 
