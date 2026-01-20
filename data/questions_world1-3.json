@@ -1,0 +1,67 @@
+{
+  "levelId": "world1-3",
+  "requiredQuestions": 5,
+  "masteryAccuracy": 70,
+  "questions": [
+    {
+      "prompt": "Which process uses sunlight to produce sugars in plant cells?",
+      "choices": ["Cellular respiration", "Photosynthesis", "Fermentation", "Diffusion"],
+      "answerIndex": 1,
+      "explanation": "Photosynthesis converts light energy into chemical energy (glucose), mainly in chloroplasts."
+    },
+    {
+      "prompt": "Which organelle is the site of photosynthesis?",
+      "choices": ["Mitochondrion", "Chloroplast", "Golgi apparatus", "Ribosome"],
+      "answerIndex": 1,
+      "explanation": "Chloroplasts contain chlorophyll and carry out photosynthesis."
+    },
+    {
+      "prompt": "Osmosis is the diffusion of which substance across a membrane?",
+      "choices": ["Salt", "Water", "Oxygen", "Glucose"],
+      "answerIndex": 1,
+      "explanation": "Osmosis specifically refers to water moving across a selectively permeable membrane."
+    },
+    {
+      "prompt": "If a cell is placed in a hypertonic solution, what is most likely to happen?",
+      "choices": ["Water enters the cell and it swells", "Water leaves the cell and it shrinks", "No net water movement", "The cell wall dissolves"],
+      "answerIndex": 1,
+      "explanation": "Hypertonic means higher solute outside, so water moves out and the cell shrinks."
+    },
+    {
+      "prompt": "Which transport requires energy (ATP) to move substances against a concentration gradient?",
+      "choices": ["Diffusion", "Osmosis", "Active transport", "Facilitated diffusion"],
+      "answerIndex": 2,
+      "explanation": "Active transport uses ATP-powered pumps to move substances from low to high concentration."
+    },
+    {
+      "prompt": "Which statement best describes facilitated diffusion?",
+      "choices": ["Moves substances from low to high concentration using ATP", "Moves water only", "Uses membrane proteins to move substances down their gradient", "Uses vesicles to export waste"],
+      "answerIndex": 2,
+      "explanation": "Facilitated diffusion uses channels or carriers to help molecules move down the gradient without ATP."
+    },
+    {
+      "prompt": "Which structure provides internal support and helps cells maintain their shape?",
+      "choices": ["Cytoskeleton", "Nucleolus", "Lysosome", "Chromosome"],
+      "answerIndex": 0,
+      "explanation": "The cytoskeleton is a network of fibers that supports shape and movement in cells."
+    },
+    {
+      "prompt": "What is the best definition of homeostasis?",
+      "choices": ["Making proteins", "Maintaining stable internal conditions", "Breaking down food", "Cell division"],
+      "answerIndex": 1,
+      "explanation": "Homeostasis is keeping internal conditions stable despite external changes."
+    },
+    {
+      "prompt": "Which is an example of a unicellular organism?",
+      "choices": ["Human", "Oak tree", "Amoeba", "Mushroom"],
+      "answerIndex": 2,
+      "explanation": "An amoeba is a single-celled organism that performs all life functions in one cell."
+    },
+    {
+      "prompt": "Which molecule stores genetic information used to make proteins?",
+      "choices": ["DNA", "ATP", "Lipid", "Glycogen"],
+      "answerIndex": 0,
+      "explanation": "DNA contains genes that provide instructions for building proteins."
+    }
+  ]
+}
