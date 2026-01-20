@@ -1,11 +1,12 @@
-/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS + IN-GAME QUESTION PANEL)
+/* BioQuest MVP - game.js (FULL FILE, POLISHED VISUALS + IN-GAME QUESTION PANEL, FIXED LAYOUT)
    Works on GitHub Pages.
 
-   Key upgrade (highest impact):
-   - Replaces blocking prompt() with an in-game modal question panel (buttons + keys 1–4)
-   - Pauses gameplay while the panel is open, then resumes
+   Key upgrade:
+   - In-game modal question panel (no prompt()) with buttons + keys 1–4
+   - Gameplay paused while modal is open
+   - FIXED: question/answer text now stays inside the modal (no spill)
 
-   Other features retained:
+   Other features:
    - Procedural textures (no external assets)
    - Player looks like a cell
    - Rounded platform tiles
@@ -139,7 +140,6 @@
         this.enemyPatrolRange = 260;
 
         this.isQuestionOpen = false;
-        this._pausedVel = null;
       }
 
       // ----- Texture generation (no external assets) -----
@@ -395,7 +395,7 @@
         this.qblocks.add(qb);
       }
 
-      // ----- In-game question modal -----
+      // ----- In-game question modal (FIXED LAYOUT) -----
       buildQuestionUI() {
         const W = 960;
         const H = 540;
@@ -405,35 +405,38 @@
           .setDepth(1000)
           .setVisible(false);
 
-        const panel = this.add.rectangle(W / 2, H / 2, 760, 380, 0x141821, 0.95)
+        const panel = this.add.rectangle(W / 2, H / 2, 820, 440, 0x141821, 0.95)
           .setScrollFactor(0)
           .setDepth(1001)
           .setVisible(false);
 
         panel.setStrokeStyle(2, 0x2a3242, 1);
 
-        const title = this.add.text(W / 2, H / 2 - 160, "Question Block", {
+        const title = this.add.text(W / 2, H / 2 - 195, "Question Block", {
           fontFamily: "monospace",
           fontSize: "18px",
           color: "#cfe7ff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
 
-        const promptText = this.add.text(W / 2, H / 2 - 120, "", {
+        const promptText = this.add.text(W / 2, H / 2 - 165, "", {
           fontFamily: "monospace",
-          fontSize: "18px",
+          fontSize: "17px",
           color: "#ffffff",
-          wordWrap: { width: 700 }
+          wordWrap: { width: 760, useAdvancedWrap: true }
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1002).setVisible(false);
 
-        const feedbackText = this.add.text(W / 2, H / 2 + 150, "", {
+        // Reserve a fixed prompt area so choices never collide with it
+        promptText.setFixedSize(760, 90);
+
+        const feedbackText = this.add.text(W / 2, H / 2 + 250, "", {
           fontFamily: "monospace",
           fontSize: "16px",
           color: "#ffffff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
 
         const makeChoiceButton = (i, y) => {
-          const btnW = 700;
-          const btnH = 48;
+          const btnW = 760;
+          const btnH = 64;
 
           const bg = this.add.rectangle(W / 2, y, btnW, btnH, 0x1e2431, 1)
             .setScrollFactor(0)
@@ -445,10 +448,13 @@
 
           const label = this.add.text(W / 2 - btnW / 2 + 16, y, "", {
             fontFamily: "monospace",
-            fontSize: "16px",
+            fontSize: "15px",
             color: "#ffffff",
-            wordWrap: { width: btnW - 32 }
+            wordWrap: { width: btnW - 32, useAdvancedWrap: true }
           }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(1003).setVisible(false);
+
+          // Keep label inside the button area
+          label.setFixedSize(btnW - 32, btnH - 10);
 
           bg.on("pointerover", () => { if (this.isQuestionOpen) bg.setFillStyle(0x252c3d, 1); });
           bg.on("pointerout", () => { if (this.isQuestionOpen) bg.setFillStyle(0x1e2431, 1); });
@@ -457,10 +463,10 @@
           return { bg, label };
         };
 
-        const c1 = makeChoiceButton(0, H / 2 + 10);
-        const c2 = makeChoiceButton(1, H / 2 + 70);
-        const c3 = makeChoiceButton(2, H / 2 + 130);
-        const c4 = makeChoiceButton(3, H / 2 + 190);
+        const c1 = makeChoiceButton(0, H / 2 - 10);
+        const c2 = makeChoiceButton(1, H / 2 + 65);
+        const c3 = makeChoiceButton(2, H / 2 + 140);
+        const c4 = makeChoiceButton(3, H / 2 + 215);
 
         this.questionUI = {
           overlay, panel, title, promptText, feedbackText,
@@ -489,14 +495,8 @@
         if (this.isQuestionOpen) return;
         this.isQuestionOpen = true;
 
-        // Pause physics but keep UI input responsive
+        // Pause physics while answering
         this.physics.world.pause();
-
-        // Store velocities to resume cleanly (optional; world.pause is enough, but safe)
-        this._pausedVel = {
-          playerVX: this.player?.body?.velocity?.x ?? 0,
-          playerVY: this.player?.body?.velocity?.y ?? 0
-        };
 
         this.questionUI.current = q;
         this.questionUI.qbRef = qbRef;
@@ -512,7 +512,6 @@
           this.questionUI.choices[i].bg.setStrokeStyle(2, 0x2f3a50, 1);
         }
 
-        // Show all
         const ui = this.questionUI;
         ui.overlay.setVisible(true);
         ui.panel.setVisible(true);
@@ -526,7 +525,6 @@
         if (!this.isQuestionOpen) return;
         this.isQuestionOpen = false;
 
-        // Hide all
         const ui = this.questionUI;
         ui.overlay.setVisible(false);
         ui.panel.setVisible(false);
@@ -539,7 +537,6 @@
         ui.qbRef = null;
         ui.locked = false;
 
-        // Resume physics
         this.physics.world.resume();
       }
 
@@ -556,18 +553,15 @@
         }
 
         this.answered += 1;
-
         const isCorrect = (choiceIndex === q.answerIndex);
         if (isCorrect) this.correct += 1;
 
-        // Visual feedback
         const chosen = ui.choices[choiceIndex];
         chosen.bg.setFillStyle(isCorrect ? 0x16351e : 0x3a1414, 1);
         chosen.bg.setStrokeStyle(2, isCorrect ? 0x34c76a : 0xff6b6b, 1);
 
         ui.feedbackText.setText(isCorrect ? "Correct! +50 points" : "Incorrect! Enemy spawned");
 
-        // Apply game effects
         if (isCorrect) {
           this.score += 50;
           const qb = ui.qbRef;
@@ -581,15 +575,11 @@
           }
         }
 
-        // Close after a short delay so they see feedback
-        this.time.delayedCall(650, () => {
-          this.closeQuestion();
-        });
+        this.time.delayedCall(650, () => this.closeQuestion());
       }
 
       // ----- Gameplay loop -----
       update() {
-        // If question modal open: allow keyboard selection 1–4, but do not run gameplay
         if (this.isQuestionOpen) {
           const k = this._questionKeys;
           if (k) {
@@ -612,7 +602,7 @@
         const onGround = this.player.body.blocked.down;
         if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
 
-        // Enemy patrol: reverse at patrol edges or walls, prevent leaving patrol range
+        // Enemy patrol: reverse at patrol edges or walls
         this.enemies.children.iterate(e => {
           if (!e?.body) return;
 
@@ -664,7 +654,6 @@
         }
       }
 
-      // Q-blocks are solid; question triggers only on bottom-hit.
       onQBlockCollide(player, qb) {
         if (qb.used) return;
 
