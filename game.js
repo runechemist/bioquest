@@ -1,11 +1,7 @@
 /* BioQuest MVP - game.js (FULL FILE)
    Polished visuals + in-game question panel + EXPLANATIONS + show correct answer
-   + CONFIRM BUTTON before closing question modal.
-
-   Fixes requested:
-   - Explanation now shows reliably (falls back to "Correct answer: ..." if missing)
-   - Adds a "Continue" button + Space/Enter to close after reviewing feedback
-   - Does NOT auto-close after a timer anymore
+   + CONFIRM BUTTON after answering
+   + NEW: IN-GAME RESULTS SCREEN (replaces end-of-level alert())
 
    Question JSON supports (recommended):
    {
@@ -142,6 +138,11 @@
         this.enemyPatrolRange = 260;
 
         this.isQuestionOpen = false;
+        this.isResultsOpen = false;
+      }
+
+      init(data) {
+        if (data && Number.isFinite(data.attempt)) this.attempt = data.attempt;
       }
 
       createProceduralTextures() {
@@ -324,7 +325,9 @@
         this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
         this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
 
+        // UI overlays
         this.buildQuestionUI();
+        this.buildResultsUI();
 
         this.levelStartMs = Date.now();
         this.updateHUD();
@@ -375,7 +378,9 @@
         this.qblocks.add(qb);
       }
 
-      // ----- Question Modal with explanation + Continue button -----
+      // -----------------------------
+      // Question Modal (explanation + Continue)
+      // -----------------------------
       buildQuestionUI() {
         const W = 960;
         const H = 540;
@@ -415,7 +420,6 @@
           color: "#ffffff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(1002).setVisible(false);
 
-        // Continue button
         const btnW = 220, btnH = 48;
         const continueBg = this.add.rectangle(W / 2, H / 2 + 255, btnW, btnH, 0x1e2431, 1)
           .setScrollFactor(0).setDepth(1002).setVisible(false);
@@ -456,7 +460,6 @@
         const c3 = makeChoiceButton(2, H / 2 + 145);
         const c4 = makeChoiceButton(3, H / 2 + 220);
 
-        // Keyboard shortcuts
         this._questionKeys = this.input.keyboard.addKeys({
           one: Phaser.Input.Keyboard.KeyCodes.ONE,
           two: Phaser.Input.Keyboard.KeyCodes.TWO,
@@ -486,7 +489,7 @@
       }
 
       openQuestion(q, qbRef) {
-        if (this.isQuestionOpen) return;
+        if (this.isQuestionOpen || this.isResultsOpen) return;
         this.isQuestionOpen = true;
 
         this.physics.world.pause();
@@ -523,7 +526,7 @@
       confirmCloseQuestion() {
         const ui = this.questionUI;
         if (!this.isQuestionOpen) return;
-        if (!ui.answered) return; // must answer first
+        if (!ui.answered) return;
         this.closeQuestion();
       }
 
@@ -539,7 +542,6 @@
         ui.explanationText.setVisible(false);
         ui.feedbackText.setVisible(false);
         ui.choices.forEach(c => { c.bg.setVisible(false); c.label.setVisible(false); });
-
         ui.continueBg.setVisible(false);
         ui.continueLabel.setVisible(false);
 
@@ -569,23 +571,18 @@
         const isCorrect = (choiceIndex === q.answerIndex);
         if (isCorrect) this.correct += 1;
 
-        // Highlight correct in green
         const correctBtn = ui.choices[q.answerIndex];
         correctBtn.bg.setFillStyle(0x16351e, 1);
         correctBtn.bg.setStrokeStyle(2, 0x34c76a, 1);
 
-        // If wrong, highlight chosen in red
         if (!isCorrect) {
           const chosen = ui.choices[choiceIndex];
           chosen.bg.setFillStyle(0x3a1414, 1);
           chosen.bg.setStrokeStyle(2, 0xff6b6b, 1);
         }
 
-        // Explanation (reliable)
         const expl = (typeof q.explanation === "string") ? q.explanation.trim() : "";
-        const correctText = (q.choices && q.choices[q.answerIndex] != null)
-          ? String(q.choices[q.answerIndex])
-          : "";
+        const correctText = (q.choices && q.choices[q.answerIndex] != null) ? String(q.choices[q.answerIndex]) : "";
 
         if (expl) {
           ui.explanationText.setText("Explanation: " + expl);
@@ -613,175 +610,59 @@
           }
         }
 
-        // Show Continue button for confirmation
         ui.continueBg.setVisible(true);
         ui.continueLabel.setVisible(true);
 
-        // Allow additional key input now (Enter/Space)
         ui.locked = false;
       }
 
-      update() {
-        // Modal open: accept answer keys; after answering accept Enter/Space to continue
-        if (this.isQuestionOpen) {
-          const k = this._questionKeys;
-          const ui = this.questionUI;
+      // -----------------------------
+      // Results Screen (replaces alert)
+      // -----------------------------
+      buildResultsUI() {
+        const W = 960;
+        const H = 540;
 
-          if (k && ui) {
-            if (!ui.answered) {
-              if (Phaser.Input.Keyboard.JustDown(k.one) || Phaser.Input.Keyboard.JustDown(k.n1)) this.submitChoice(0);
-              if (Phaser.Input.Keyboard.JustDown(k.two) || Phaser.Input.Keyboard.JustDown(k.n2)) this.submitChoice(1);
-              if (Phaser.Input.Keyboard.JustDown(k.three) || Phaser.Input.Keyboard.JustDown(k.n3)) this.submitChoice(2);
-              if (Phaser.Input.Keyboard.JustDown(k.four) || Phaser.Input.Keyboard.JustDown(k.n4)) this.submitChoice(3);
-            } else {
-              if (Phaser.Input.Keyboard.JustDown(k.enter) || Phaser.Input.Keyboard.JustDown(k.space)) {
-                this.confirmCloseQuestion();
-              }
-            }
-          }
+        const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6)
+          .setScrollFactor(0).setDepth(2000).setVisible(false);
 
-          this.updateHUD();
-          return;
-        }
+        const panel = this.add.rectangle(W / 2, H / 2, 780, 420, 0x141821, 0.97)
+          .setScrollFactor(0).setDepth(2001).setVisible(false);
+        panel.setStrokeStyle(2, 0x2a3242, 1);
 
-        const left = this.cursors.left.isDown || this.keyA.isDown;
-        const right = this.cursors.right.isDown || this.keyD.isDown;
+        const title = this.add.text(W / 2, H / 2 - 170, "Level Results", {
+          fontFamily: "monospace",
+          fontSize: "22px",
+          color: "#cfe7ff"
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(2002).setVisible(false);
 
-        if (left) this.player.body.setVelocityX(-220);
-        else if (right) this.player.body.setVelocityX(220);
-        else this.player.body.setVelocityX(0);
+        const body = this.add.text(W / 2, H / 2 - 120, "", {
+          fontFamily: "monospace",
+          fontSize: "16px",
+          color: "#ffffff",
+          align: "center",
+          wordWrap: { width: 720, useAdvancedWrap: true }
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(2002).setVisible(false);
+        body.setFixedSize(720, 220);
 
-        const onGround = this.player.body.blocked.down;
-        if (this.cursors.up.isDown && onGround) this.player.body.setVelocityY(-560);
+        const tip = this.add.text(W / 2, H / 2 + 110, "", {
+          fontFamily: "monospace",
+          fontSize: "14px",
+          color: "#cfe7ff",
+          align: "center",
+          wordWrap: { width: 720, useAdvancedWrap: true }
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(2002).setVisible(false);
+        tip.setFixedSize(720, 40);
 
-        this.enemies.children.iterate(e => {
-          if (!e?.body) return;
+        const makeBtn = (x, y, label) => {
+          const bw = 240, bh = 52;
+          const bg = this.add.rectangle(x, y, bw, bh, 0x1e2431, 1)
+            .setScrollFactor(0).setDepth(2002).setVisible(false);
+          bg.setStrokeStyle(2, 0x2f3a50, 1);
+          bg.setInteractive({ useHandCursor: true });
 
-          if (Math.abs(e.body.velocity.x) < 5) {
-            const dir = (e.x <= (e.patrolMinX + 5)) ? 1 : -1;
-            e.body.setVelocityX(dir * this.enemySpeed);
-          }
-
-          if (e.x <= e.patrolMinX) e.body.setVelocityX(this.enemySpeed);
-          if (e.x >= e.patrolMaxX) e.body.setVelocityX(-this.enemySpeed);
-
-          if (e.body.blocked.left || e.body.touching.left) e.body.setVelocityX(this.enemySpeed);
-          if (e.body.blocked.right || e.body.touching.right) e.body.setVelocityX(-this.enemySpeed);
-
-          if (e.y > this.physics.world.bounds.height + 100) {
-            e.y = 200;
-            e.x = (e.patrolMinX + e.patrolMaxX) / 2;
-            e.body.setVelocityX(-this.enemySpeed);
-          }
-        });
-
-        this.updateHUD();
-      }
-
-      onCoin(player, coin) {
-        coin.destroy();
-        this.score += 10;
-      }
-
-      onEnemy(player, enemy) {
-        const playerFalling = player.body.velocity.y > 50;
-        const playerAbove = player.y + 10 < enemy.y;
-
-        if (playerFalling && playerAbove) {
-          enemy.destroy();
-          player.body.setVelocityY(-260);
-          this.score += 25;
-          return;
-        }
-
-        if (!this.infiniteLives) this.lives -= 1;
-
-        player.body.setVelocityX(player.x < enemy.x ? -220 : 220);
-        player.body.setVelocityY(-260);
-
-        if (!this.infiniteLives && this.lives <= 0) {
-          this.endAttempt(false, "out_of_lives");
-        }
-      }
-
-      onQBlockCollide(player, qb) {
-        if (qb.used) return;
-
-        const hitFromBelow = player.body.touching.up && qb.body.touching.down;
-        if (!hitFromBelow) return;
-
-        qb.used = true;
-        qb.setAlpha(0.55);
-
-        const q = questionBank.questions[this.qIndex % questionBank.questions.length];
-        this.qIndex++;
-
-        this.openQuestion(q, qb);
-      }
-
-      onWin() {
-        if (this.isQuestionOpen) return;
-        this.endAttempt(true, "completed");
-      }
-
-      endAttempt(completed, reason) {
-        if (this.isQuestionOpen) this.closeQuestion();
-
-        const ms = Date.now() - this.levelStartMs;
-        const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
-
-        const result = {
-          levelId: questionBank.levelId || "world1-1",
-          completed,
-          reason,
-          score: this.score,
-          answered: this.answered,
-          correct: this.correct,
-          accuracy,
-          livesRemaining: this.infiniteLives ? null : this.lives,
-          attempt: this.attempt,
-          durationMs: ms,
-          atISO: new Date().toISOString(),
-          masteryMet: accuracy >= this.masteryAccuracy
-        };
-
-        BQ.writeResult(session.classCode, session.studentId, result);
-
-        alert(
-          `Level End\n\n` +
-          `Completed: ${completed}\n` +
-          `Accuracy: ${accuracy}% (Mastery: ${this.masteryAccuracy}%)\n` +
-          `Score: ${this.score}\n` +
-          `Answered: ${this.correct}/${this.answered}\n` +
-          `Attempt: ${this.attempt}/${this.attemptsAllowed}\n`
-        );
-
-        if (session.mode === "assessment" && !result.masteryMet) {
-          this.attempt += 1;
-          if (this.attempt > this.attemptsAllowed) {
-            this.scene.restart();
-            return;
-          }
-        }
-
-        this.scene.restart();
-      }
-
-      updateHUD() {
-        const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
-        const lifeText = this.infiniteLives ? "∞" : String(this.lives);
-        this.hud.setText(`Score ${this.score}   Lives ${lifeText}   Acc ${accuracy}%   Q ${this.correct}/${this.answered}`);
-      }
-    };
-  }
-
-  function escapeHtml(s) {
-    return String(s ?? "").replace(/[&<>"']/g, c => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      "\"": "&quot;",
-      "'": "&#39;"
-    }[c]));
-  }
-})();
+          const txt = this.add.text(x, y, label, {
+            fontFamily: "monospace",
+            fontSize: "14px",
+            color: "#ffffff"
+          }).setOrigin(0.5).setScro
