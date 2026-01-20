@@ -219,7 +219,28 @@
   </script>
 
   <!-- Game -->
-  <script src="./game.js"></script>
+  <script>
+  function loadGameJsOnce() {
+    if (window.__GAME_LOADED__) return;
+    window.__GAME_LOADED__ = true;
+
+    const s = document.createElement("script");
+    s.src = "./game.js";
+    document.body.appendChild(s);
+  }
+
+  // Modify the click handler to set boot AND then load game.js
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".level-btn");
+    if (!btn || btn.disabled) return;
+
+    window.BIOQUEST_SELECTED_LEVEL = btn.dataset.level;
+    startGameFromUI();     // sets BIOQUEST_SESSION_BOOT
+    loadGameJsOnce();      // loads game.js after boot exists
+  });
+</script>
+
 
 </body>
 </html>
+
