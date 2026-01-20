@@ -1,40 +1,25 @@
 /* BioQuest - game.js (FULL FILE)
-   Multi-level support driven by index.html selection.
+   Multi-level support + in-game progression (Next Level button).
 
-   Reads session boot info from:
+   Reads boot info from:
      window.BIOQUEST_SESSION_BOOT = { classCode, studentId, mode, levelId }
 
    Loads questions from:
      ./data/questions_<levelId>.json
-     Examples:
-       questions_world1-1.json
-       questions_world1-2.json
-       questions_world1-3.json
-
-   Level JSON format (recommended):
-   {
-     "levelId": "world1-1",
-     "requiredQuestions": 3,
-     "masteryAccuracy": 70,   // optional override; otherwise class settings used
-     "questions": [
-       { "prompt": "...", "choices": ["...","...","...","..."], "answerIndex": 0, "explanation": "..." }
-     ]
-   }
 
    Completion is ALWAYS possible:
      - Flag unlocks after requiredQuestions are answered (finishable)
-     - Mastery is still tracked for grading (passable)
+     - Mastery is tracked (passable) and logged
 
-   Unlock progression (completion-based):
-     world1-1 -> world1-2 -> world1-3
+   New:
+     - Results screen includes "Next Level (N)" when available
+     - Clicking Next loads the next JSON and restarts the Phaser game directly
 */
 
 (() => {
-  // ---------- Boot: read session from index.html ----------
+  // ---------- Boot session ----------
   const boot = window.BIOQUEST_SESSION_BOOT || null;
   if (!boot || !boot.classCode || !boot.studentId || !boot.mode) {
-    // If someone opens the page without going through the index UI,
-    // show a clear message instead of a blank screen.
     const ui = document.getElementById("ui");
     if (ui) {
       ui.innerHTML = `
@@ -50,23 +35,29 @@
   const session = {
     classCode: String(boot.classCode).trim().toUpperCase(),
     studentId: String(boot.studentId).trim(),
-    mode: boot.mode === "practice" ? "practice" : "assessment",
-    levelId: String(boot.levelId || "world1-1").trim()
+    mode: boot.mode === "practice" ? "practice" : "assessment"
   };
 
-  // ---------- Load class settings + level question data, then start Phaser ----------
-  (async () => {
+  const LEVEL_ORDER = ["world1-1", "world1-2", "world1-3"];
+
+  function nextLevelId(current) {
+    const i = LEVEL_ORDER.indexOf(current);
+    if (i === -1) return null;
+    return LEVEL_ORDER[i + 1] || null;
+  }
+
+  // ---------- Runtime loader (used for initial start AND next level) ----------
+  async function loadRuntime(levelId) {
     if (!window.BQ) {
       alert("Storage library not loaded. Ensure shared/storage.js is included before game.js.");
-      return;
+      return null;
     }
 
     const classSettings = BQ.getClassSettings(session.classCode);
 
-    // Load per-level JSON
     let levelData;
     try {
-      const path = `./data/questions_${session.levelId}.json`;
+      const path = `./data/questions_${levelId}.json`;
       const res = await fetch(path, { cache: "no-store" });
       if (!res.ok) throw new Error(`${path} HTTP ${res.status}`);
       levelData = await res.json();
@@ -74,31 +65,27 @@
     } catch (e) {
       console.error(e);
       alert("Game failed to load level data.\n\n" + e.message);
-      return;
+      return null;
     }
 
-    // Merge settings: level overrides > class settings > defaults
-    const mergedSettings = {
-      classCode: session.classCode,
+    const settings = {
       masteryAccuracy: Number(levelData.masteryAccuracy ?? classSettings.masteryAccuracy ?? 70),
       attemptsAllowed: Number(classSettings.attemptsAllowed ?? 3),
       infiniteLives: (session.mode === "practice") ? true : !!classSettings.infiniteLives
     };
 
-    const runtime = {
-      session,
-      settings: mergedSettings,
+    return {
+      session: { ...session, levelId },
+      settings,
       level: {
-        levelId: String(levelData.levelId || session.levelId || "world1-1"),
+        levelId: String(levelData.levelId || levelId),
         requiredQuestions: Number(levelData.requiredQuestions ?? 3),
         questions: levelData.questions
       }
     };
+  }
 
-    startGame(runtime);
-  })();
-
-  function startGame(runtime) {
+  function startPhaser(runtime) {
     const config = {
       type: Phaser.AUTO,
       parent: "game",
@@ -115,14 +102,29 @@
     window.__bioquestGame = new Phaser.Game(config);
   }
 
-  // ---------- Level progression ----------
-  function nextLevelId(current) {
-    const order = ["world1-1", "world1-2", "world1-3"];
-    const i = order.indexOf(current);
-    if (i === -1) return null;
-    return order[i + 1] || null;
-  }
+  // Expose a safe in-game loader for “Next Level”
+  window.__bioquestStartLevel = async function (levelId) {
+    const runtime = await loadRuntime(levelId);
+    if (!runtime) return;
 
+    // Keep boot updated (useful if you ever reload)
+    window.BIOQUEST_SESSION_BOOT = {
+      classCode: session.classCode,
+      studentId: session.studentId,
+      mode: session.mode,
+      levelId
+    };
+
+    startPhaser(runtime);
+  };
+
+  // ---------- Initial start ----------
+  (async () => {
+    const initialLevel = String(boot.levelId || "world1-1").trim();
+    await window.__bioquestStartLevel(initialLevel);
+  })();
+
+  // ---------- Scene ----------
   function makeScene(runtime) {
     const { session, settings, level } = runtime;
 
@@ -130,7 +132,6 @@
       constructor() {
         super("BioQuestScene");
 
-        // Gate: finishable after requiredQuestions (mastery is separate)
         this.REQUIRED_QUESTIONS = Math.max(1, Number(level.requiredQuestions || 3));
         this.masteryAccuracy = Number(settings.masteryAccuracy ?? 70);
 
@@ -149,7 +150,6 @@
         this.isResultsOpen = false;
 
         this.flagUnlocked = false;
-        this.masteryMetNow = false;
 
         this.flagMessageUntil = 0;
       }
@@ -158,11 +158,10 @@
         if (data && Number.isFinite(data.attempt)) this.attempt = data.attempt;
       }
 
-      // ---------- Procedural textures ----------
       createProceduralTextures() {
         if (this.textures.exists("cellPlayer")) return;
 
-        // Player cell texture (48x48)
+        // Player cell texture
         {
           const g = this.make.graphics({ x: 0, y: 0, add: false });
           const size = 48, cx = size / 2, cy = size / 2;
@@ -186,7 +185,7 @@
           g.destroy();
         }
 
-        // Platform tile (64x24)
+        // Platform
         {
           const p = this.make.graphics({ x: 0, y: 0, add: false });
           p.fillStyle(0x2f2f2f, 1);
@@ -197,9 +196,9 @@
           p.destroy();
         }
 
-        // Coin (20x20)
+        // Coin
         {
-          const c = this.make.graphics({ x: 0, y: 0, add: false });
+          const c = this.make.graphicsscics({ x: 0, y: 0, add: false });
           c.fillStyle(0xffd34d, 1);
           c.fillCircle(10, 10, 9);
           c.fillStyle(0xffffff, 0.45);
@@ -208,7 +207,7 @@
           c.destroy();
         }
 
-        // Q-block (28x28)
+        // Q-block
         {
           const q = this.make.graphics({ x: 0, y: 0, add: false });
           q.fillStyle(0xdedcff, 1);
@@ -233,7 +232,7 @@
           q.destroy();
         }
 
-        // Enemy (30x30)
+        // Enemy
         {
           const e = this.make.graphics({ x: 0, y: 0, add: false });
           e.fillStyle(0xff6666, 1);
@@ -246,7 +245,7 @@
           e.destroy();
         }
 
-        // Flag (18x200)
+        // Flag
         {
           const f = this.make.graphics({ x: 0, y: 0, add: false });
           f.fillStyle(0x00ff66, 1);
@@ -276,7 +275,6 @@
           color: "#fff"
         }).setScrollFactor(0);
 
-        // brief message for locked flag
         this.flagMsg = this.add.text(480, 70, "", {
           fontFamily: "monospace",
           fontSize: "14px",
@@ -303,8 +301,8 @@
           this.platforms.add(ground);
         }
 
-        // Simple per-level layout tweaks
-        this.buildLevelLayout(session.levelId, H, levelWidth);
+        // Layout
+        this.buildLevelLayout(session.levelId, H);
 
         // Player
         this.player = this.physics.add.image(80, H - 90, "cellPlayer");
@@ -337,7 +335,6 @@
         this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
         this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
 
-        // UI overlays
         this.buildQuestionUI();
         this.buildResultsUI();
 
@@ -346,8 +343,7 @@
         this.updateHUD();
       }
 
-      buildLevelLayout(levelId, H, levelWidth) {
-        // Clear-ish defaults
+      buildLevelLayout(levelId, H) {
         const addCoin = (x, y) => this.spawnCoin(x, y);
         const addEnemy = (x, y) => this.spawnEnemy(x, y);
         const addQB = (x, y, id) => this.spawnQBlock(x, y, id);
@@ -425,7 +421,6 @@
         addQB(2050, 300, "qb3");
       }
 
-      // ---------- Helpers ----------
       addPlatform(x, y, widthPx) {
         const segments = Math.max(1, Math.round(widthPx / 64));
         const totalW = segments * 64;
@@ -449,10 +444,8 @@
         enemy.body.setAllowGravity(true);
         enemy.body.setImmovable(false);
         enemy.body.setGravityY(900);
-        enemy.body.setDrag(0, 0);
         enemy.body.setSize(26, 26, true);
         enemy.body.setMaxVelocity(240, 1200);
-        enemy.body.setBounce(0, 0);
 
         const w = this.physics.world.bounds.width;
         enemy.patrolMinX = Math.max(20, x - this.enemyPatrolRange);
@@ -470,26 +463,17 @@
         this.qblocks.add(qb);
       }
 
-      // ---------- Gate logic (finishable) ----------
       recomputeGateState() {
-        const acc = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
-        this.masteryMetNow = acc >= this.masteryAccuracy;
-
-        // finishable: only requires questions
         this.flagUnlocked = this.answered >= this.REQUIRED_QUESTIONS;
       }
 
       showFlagLockedMessage() {
         const needQ = Math.max(0, this.REQUIRED_QUESTIONS - this.answered);
-        const msg =
-          `Flag is locked. Answer ${needQ} more question(s) to finish this level.`;
-
-        this.flagMsg.setText(msg);
+        this.flagMsg.setText(`Flag is locked. Answer ${needQ} more question(s) to finish this level.`);
         this.flagMsg.setVisible(true);
         this.flagMessageUntil = Date.now() + 1600;
       }
 
-      // ---------- Question UI ----------
       buildQuestionUI() {
         const W = 960, H = 540;
 
@@ -541,6 +525,7 @@
 
         const makeChoiceButton = (i, y) => {
           const bw = 760, bh = 64;
+
           const bg = this.add.rectangle(W / 2, y, bw, bh, 0x1e2431, 1)
             .setScrollFactor(0).setDepth(1002).setVisible(false);
           bg.setStrokeStyle(2, 0x2f3a50, 1);
@@ -579,18 +564,14 @@
           space: Phaser.Input.Keyboard.KeyCodes.SPACE
         });
 
-        continueBg.on("pointerover", () => { if (this.isQuestionOpen) continueBg.setFillStyle(0x252c3d, 1); });
-        continueBg.on("pointerout", () => { if (this.isQuestionOpen) continueBg.setFillStyle(0x1e2431, 1); });
         continueBg.on("pointerdown", () => { if (this.isQuestionOpen) this.confirmCloseQuestion(); });
 
         this.questionUI = {
           overlay, panel, title, promptText, explanationText, feedbackText,
           choices: [c1, c2, c3, c4],
           continueBg, continueLabel,
-          current: null,
-          qbRef: null,
-          locked: false,
-          answered: false
+          current: null, qbRef: null,
+          locked: false, answered: false
         };
       }
 
@@ -606,8 +587,7 @@
         ui.answered = false;
 
         ui.feedbackText.setText("");
-        ui.explanationText.setText("");
-        ui.explanationText.setVisible(false);
+        ui.explanationText.setText("").setVisible(false);
         ui.continueBg.setVisible(false);
         ui.continueLabel.setVisible(false);
 
@@ -629,8 +609,7 @@
 
       confirmCloseQuestion() {
         const ui = this.questionUI;
-        if (!this.isQuestionOpen) return;
-        if (!ui.answered) return;
+        if (!this.isQuestionOpen || !ui.answered) return;
         this.closeQuestion();
       }
 
@@ -655,7 +634,6 @@
         ui.answered = false;
 
         this.physics.world.resume();
-
         this.recomputeGateState();
       }
 
@@ -677,7 +655,6 @@
         const isCorrect = (choiceIndex === q.answerIndex);
         if (isCorrect) this.correct += 1;
 
-        // highlight correct
         const correctBtn = ui.choices[q.answerIndex];
         correctBtn.bg.setFillStyle(0x16351e, 1);
         correctBtn.bg.setStrokeStyle(2, 0x34c76a, 1);
@@ -690,57 +667,47 @@
 
         const expl = (typeof q.explanation === "string") ? q.explanation.trim() : "";
         const correctText = (q.choices && q.choices[q.answerIndex] != null) ? String(q.choices[q.answerIndex]) : "";
-
         if (expl) {
-          ui.explanationText.setText("Explanation: " + expl);
-          ui.explanationText.setVisible(true);
+          ui.explanationText.setText("Explanation: " + expl).setVisible(true);
         } else if (correctText) {
-          ui.explanationText.setText("Correct answer: " + correctText);
-          ui.explanationText.setVisible(true);
-        } else {
-          ui.explanationText.setText("");
-          ui.explanationText.setVisible(false);
+          ui.explanationText.setText("Correct answer: " + correctText).setVisible(true);
         }
 
         if (isCorrect) {
           ui.feedbackText.setText("Correct! +50 points");
           this.score += 50;
-          const qb = ui.qbRef;
-          if (qb) this.spawnCoin(qb.x, qb.y - 30);
+          if (ui.qbRef) this.spawnCoin(ui.qbRef.x, ui.qbRef.y - 30);
         } else {
           ui.feedbackText.setText("Incorrect! Enemy spawned");
-          const qb = ui.qbRef;
-          if (qb) {
-            const e = this.spawnEnemy(qb.x + 40, qb.y - 10);
-            e.patrolMinX = Math.max(e.patrolMinX, qb.x - 140);
-            e.patrolMaxX = Math.min(e.patrolMaxX, qb.x + 140);
+          if (ui.qbRef) {
+            const e = this.spawnEnemy(ui.qbRef.x + 40, ui.qbRef.y - 10);
+            e.patrolMinX = Math.max(e.patrolMinX, ui.qbRef.x - 140);
+            e.patrolMaxX = Math.min(e.patrolMaxX, ui.qbRef.x + 140);
           }
         }
 
         ui.continueBg.setVisible(true);
         ui.continueLabel.setVisible(true);
-
         ui.locked = false;
       }
 
-      // ---------- Results UI ----------
       buildResultsUI() {
         const W = 960, H = 540;
 
         const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6)
           .setScrollFactor(0).setDepth(2000).setVisible(false);
 
-        const panel = this.add.rectangle(W / 2, H / 2, 780, 440, 0x141821, 0.97)
+        const panel = this.add.rectangle(W / 2, H / 2, 780, 460, 0x141821, 0.97)
           .setScrollFactor(0).setDepth(2001).setVisible(false);
         panel.setStrokeStyle(2, 0x2a3242, 1);
 
-        const title = this.add.text(W / 2, H / 2 - 185, "Level Results", {
+        const title = this.add.text(W / 2, H / 2 - 200, "Level Results", {
           fontFamily: "monospace",
           fontSize: "22px",
           color: "#cfe7ff"
         }).setOrigin(0.5).setScrollFactor(0).setDepth(2002).setVisible(false);
 
-        const body = this.add.text(W / 2, H / 2 - 140, "", {
+        const body = this.add.text(W / 2, H / 2 - 150, "", {
           fontFamily: "monospace",
           fontSize: "16px",
           color: "#ffffff",
@@ -749,17 +716,8 @@
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(2002).setVisible(false);
         body.setFixedSize(720, 240);
 
-        const tip = this.add.text(W / 2, H / 2 + 115, "", {
-          fontFamily: "monospace",
-          fontSize: "14px",
-          color: "#cfe7ff",
-          align: "center",
-          wordWrap: { width: 720, useAdvancedWrap: true }
-        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(2002).setVisible(false);
-        tip.setFixedSize(720, 42);
-
         const makeBtn = (x, y, label) => {
-          const bw = 300, bh = 52;
+          const bw = 360, bh = 52;
           const bg = this.add.rectangle(x, y, bw, bh, 0x1e2431, 1)
             .setScrollFactor(0).setDepth(2002).setVisible(false);
           bg.setStrokeStyle(2, 0x2f3a50, 1);
@@ -777,25 +735,26 @@
           return { bg, txt };
         };
 
-        const primary = makeBtn(W / 2, H / 2 + 175, "Retry (R / Enter)");
-        const secondary = makeBtn(W / 2, H / 2 + 240, "Return to Level Select (M)");
+        const btnRetry = makeBtn(W / 2, H / 2 + 120, "Retry (R / Enter)");
+        const btnNext = makeBtn(W / 2, H / 2 + 180, "Next Level (N)");
+        const btnMenu = makeBtn(W / 2, H / 2 + 240, "Return to Level Select (M)");
 
         this._resultsKeys = this.input.keyboard.addKeys({
           enter: Phaser.Input.Keyboard.KeyCodes.ENTER,
-          space: Phaser.Input.Keyboard.KeyCodes.SPACE,
           r: Phaser.Input.Keyboard.KeyCodes.R,
+          n: Phaser.Input.Keyboard.KeyCodes.N,
           m: Phaser.Input.Keyboard.KeyCodes.M
         });
 
-        primary.bg.on("pointerdown", () => { if (this.isResultsOpen) this.onResultsPrimary(); });
-        secondary.bg.on("pointerdown", () => { if (this.isResultsOpen) this.onResultsMenu(); });
+        btnRetry.bg.on("pointerdown", () => { if (this.isResultsOpen) this.onResultsRetry(); });
+        btnNext.bg.on("pointerdown", () => { if (this.isResultsOpen) this.onResultsNext(); });
+        btnMenu.bg.on("pointerdown", () => { if (this.isResultsOpen) this.onResultsMenu(); });
 
         this.resultsUI = {
-          overlay, panel, title, body, tip,
-          primary, secondary,
+          overlay, panel, title, body,
+          btnRetry, btnNext, btnMenu,
           lastResult: null,
-          nextAttempt: null,
-          primaryMode: "retry"
+          nextId: null
         };
       }
 
@@ -806,46 +765,24 @@
         if (this.isQuestionOpen) this.closeQuestion();
         this.physics.world.pause();
 
-        // Unlock next level on COMPLETION
+        // Unlock next level on completion
         if (result.completed) {
           const nextId = nextLevelId(result.levelId);
           if (nextId && typeof window.unlockLevel === "function") {
-            try { window.unlockLevel(nextId); } catch (e) { console.warn("unlockLevel failed", e); }
+            try { window.unlockLevel(nextId); } catch {}
           }
         }
 
         const ui = this.resultsUI;
         ui.lastResult = result;
+        ui.nextId = nextLevelId(result.levelId);
 
         const durationSec = Math.max(0, Math.round((result.durationMs || 0) / 1000));
         const mastered = !!result.masteryMet;
 
-        let primaryLabel = "Play Again (Enter)";
-        let tipText = "Press Enter/R to replay, or M to return to level select.";
-
-        if (session.mode === "assessment") {
-          if (!mastered && this.attempt < this.attemptsAllowed) {
-            ui.primaryMode = "retry_attempt";
-            ui.nextAttempt = this.attempt + 1;
-            primaryLabel = `Retry Attempt ${ui.nextAttempt}/${this.attemptsAllowed} (Enter/R)`;
-            tipText = "You can retry to reach mastery (completion already recorded).";
-          } else {
-            ui.primaryMode = "done";
-            ui.nextAttempt = null;
-            primaryLabel = "Play Again (Enter)";
-            tipText = mastered ? "Mastery met. You may replay for practice." : "No attempts remaining. You may replay for practice.";
-          }
-        } else {
-          ui.primaryMode = "practice";
-          ui.nextAttempt = null;
-        }
-
-        ui.primary.txt.setText(primaryLabel);
-
         ui.body.setText(
           `Level: ${result.levelId}\n` +
-          `Completed: ${result.completed}\n` +
-          `Reason: ${result.reason}\n\n` +
+          `Completed: ${result.completed}\n\n` +
           `Accuracy: ${result.accuracy}% (Mastery: ${this.masteryAccuracy}%)\n` +
           `Questions: ${result.correct}/${result.answered} (Required: ${this.REQUIRED_QUESTIONS})\n` +
           `Score: ${result.score}\n` +
@@ -855,17 +792,21 @@
           (mastered ? "✅ Mastery Met" : "❌ Mastery Not Met")
         );
 
-        ui.tip.setText(tipText);
+        // Show/hide Next Level button depending on availability
+        const hasNext = !!ui.nextId;
+        ui.btnNext.bg.setVisible(hasNext);
+        ui.btnNext.txt.setVisible(hasNext);
 
         ui.overlay.setVisible(true);
         ui.panel.setVisible(true);
         ui.title.setVisible(true);
         ui.body.setVisible(true);
-        ui.tip.setVisible(true);
-        ui.primary.bg.setVisible(true);
-        ui.primary.txt.setVisible(true);
-        ui.secondary.bg.setVisible(true);
-        ui.secondary.txt.setVisible(true);
+
+        ui.btnRetry.bg.setVisible(true);
+        ui.btnRetry.txt.setVisible(true);
+
+        ui.btnMenu.bg.setVisible(true);
+        ui.btnMenu.txt.setVisible(true);
       }
 
       closeResults() {
@@ -877,38 +818,39 @@
         ui.panel.setVisible(false);
         ui.title.setVisible(false);
         ui.body.setVisible(false);
-        ui.tip.setVisible(false);
-        ui.primary.bg.setVisible(false);
-        ui.primary.txt.setVisible(false);
-        ui.secondary.bg.setVisible(false);
-        ui.secondary.txt.setVisible(false);
+
+        ui.btnRetry.bg.setVisible(false);
+        ui.btnRetry.txt.setVisible(false);
+
+        ui.btnNext.bg.setVisible(false);
+        ui.btnNext.txt.setVisible(false);
+
+        ui.btnMenu.bg.setVisible(false);
+        ui.btnMenu.txt.setVisible(false);
 
         ui.lastResult = null;
-        ui.nextAttempt = null;
+        ui.nextId = null;
 
         this.physics.world.resume();
       }
 
-      onResultsPrimary() {
-        const ui = this.resultsUI;
-        if (!ui || !ui.lastResult) return;
-
+      onResultsRetry() {
         this.closeResults();
-
-        if (session.mode === "assessment" && ui.primaryMode === "retry_attempt" && Number.isFinite(ui.nextAttempt)) {
-          this.scene.restart({ attempt: ui.nextAttempt });
-          return;
-        }
-
         this.scene.restart({ attempt: 1 });
       }
 
+      onResultsNext() {
+        const ui = this.resultsUI;
+        if (!ui.nextId) return;
+
+        // Keep it “in game”: start next level directly
+        window.__bioquestStartLevel(ui.nextId);
+      }
+
       onResultsMenu() {
-        // Go back to level select by reloading the page
         window.location.reload();
       }
 
-      // ---------- Update loop ----------
       update() {
         if (this.flagMsg.visible && Date.now() > this.flagMessageUntil) {
           this.flagMsg.setVisible(false);
@@ -917,12 +859,9 @@
         if (this.isResultsOpen) {
           const k = this._resultsKeys;
           if (k) {
-            if (Phaser.Input.Keyboard.JustDown(k.enter) || Phaser.Input.Keyboard.JustDown(k.space) || Phaser.Input.Keyboard.JustDown(k.r)) {
-              this.onResultsPrimary();
-            }
-            if (Phaser.Input.Keyboard.JustDown(k.m)) {
-              this.onResultsMenu();
-            }
+            if (Phaser.Input.Keyboard.JustDown(k.enter) || Phaser.Input.Keyboard.JustDown(k.r)) this.onResultsRetry();
+            if (Phaser.Input.Keyboard.JustDown(k.n)) this.onResultsNext();
+            if (Phaser.Input.Keyboard.JustDown(k.m)) this.onResultsMenu();
           }
           this.updateHUD();
           return;
@@ -939,9 +878,7 @@
               if (Phaser.Input.Keyboard.JustDown(k.three) || Phaser.Input.Keyboard.JustDown(k.n3)) this.submitChoice(2);
               if (Phaser.Input.Keyboard.JustDown(k.four) || Phaser.Input.Keyboard.JustDown(k.n4)) this.submitChoice(3);
             } else {
-              if (Phaser.Input.Keyboard.JustDown(k.enter) || Phaser.Input.Keyboard.JustDown(k.space)) {
-                this.confirmCloseQuestion();
-              }
+              if (Phaser.Input.Keyboard.JustDown(k.enter) || Phaser.Input.Keyboard.JustDown(k.space)) this.confirmCloseQuestion();
             }
           }
 
@@ -974,18 +911,11 @@
 
           if (e.body.blocked.left || e.body.touching.left) e.body.setVelocityX(this.enemySpeed);
           if (e.body.blocked.right || e.body.touching.right) e.body.setVelocityX(-this.enemySpeed);
-
-          if (e.y > this.physics.world.bounds.height + 100) {
-            e.y = 200;
-            e.x = (e.patrolMinX + e.patrolMaxX) / 2;
-            e.body.setVelocityX(-this.enemySpeed);
-          }
         });
 
         this.updateHUD();
       }
 
-      // ---------- Interactions ----------
       onCoin(player, coin) {
         coin.destroy();
         this.score += 10;
@@ -1041,7 +971,6 @@
         this.endAttempt(true, "completed");
       }
 
-      // ---------- End attempt ----------
       endAttempt(completed, reason) {
         if (this.isResultsOpen) return;
         if (this.isQuestionOpen) this.closeQuestion();
@@ -1065,11 +994,7 @@
           requiredQuestions: this.REQUIRED_QUESTIONS
         };
 
-        try {
-          BQ.writeResult(session.classCode, session.studentId, result);
-        } catch (e) {
-          console.error("BQ.writeResult failed", e);
-        }
+        try { BQ.writeResult(session.classCode, session.studentId, result); } catch (e) { console.error(e); }
 
         this.openResults(result);
       }
@@ -1077,13 +1002,12 @@
       updateHUD() {
         const accuracy = this.answered === 0 ? 0 : Math.round((this.correct / this.answered) * 100);
         const lifeText = this.infiniteLives ? "∞" : String(this.lives);
-        const attemptText = (session.mode === "assessment") ? `   Attempt ${this.attempt}/${this.attemptsAllowed}` : "";
         const qProgress = `${Math.min(this.answered, this.REQUIRED_QUESTIONS)}/${this.REQUIRED_QUESTIONS}`;
         const flagStatus = this.flagUnlocked ? "UNLOCKED" : "LOCKED";
         const masteryStatus = (accuracy >= this.masteryAccuracy) ? "MET" : "NOT MET";
 
         this.hud.setText(
-          `Level ${level.levelId || session.levelId}   Score ${this.score}   Lives ${lifeText}   Acc ${accuracy}%   Q ${this.correct}/${this.answered}${attemptText}\n` +
+          `Level ${level.levelId || session.levelId}   Score ${this.score}   Lives ${lifeText}   Acc ${accuracy}%   Q ${this.correct}/${this.answered}\n` +
           `Finish Gate: ${flagStatus} (Questions ${qProgress})   Mastery: ${masteryStatus} (>= ${this.masteryAccuracy}%)`
         );
       }
