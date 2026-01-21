@@ -198,7 +198,7 @@
 
         // Coin
         {
-          const c = this.make.graphicsscics({ x: 0, y: 0, add: false });
+          const c = this.make.graphics({ x: 0, y: 0, add: false });
           c.fillStyle(0xffd34d, 1);
           c.fillCircle(10, 10, 9);
           c.fillStyle(0xffffff, 0.45);
@@ -1014,3 +1014,4 @@
     };
   }
 })();
+
